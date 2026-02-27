@@ -447,7 +447,7 @@ function saveAutoEndSettings() {
       idleMinutes,
     },
   });
-  if (idleMinutes < 5) {
+  if (enabledEl.checked && idleMinutes < 5) {
     alert('閒置分鐘數低於 5 分鐘可能導致分頁頻繁被終止，請謹慎使用。');
   }
 }

@@ -1,6 +1,6 @@
-# Chrome Dev End Tasker
+# Chromium Browser End Tasker
 
-Chrome Dev + End Task 版本。一鍵終止分頁 process，釋放記憶體與 CPU 資源。等同於 Chrome Task Manager 的 End Task 功能。
+Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CPU 資源。等同於 Chrome Task Manager 的 End Task 功能。
 
 ## 功能
 
@@ -16,6 +16,7 @@ Chrome Dev + End Task 版本。一鍵終止分頁 process，釋放記憶體與 C
 - 啟用後，閒置超過指定分鐘數的分頁會自動被終止
 - 可設定閒置時間（1–120 分鐘）
 - 每分鐘檢查一次
+- 白名單：可排除特定網站，使其不受自動終止影響
 
 ### 快捷鍵
 
@@ -26,7 +27,7 @@ Chrome Dev + End Task 版本。一鍵終止分頁 process，釋放記憶體與 C
 
 - 點擊工具列圖示開啟 popup，選擇分頁後按「End Task」
 - 使用快捷鍵終止當前分頁
-- popup 內可設定自動 End Task 與閒置分鐘數
+- popup 內可設定自動 End Task、閒置分鐘數與白名單
 
 ## 安裝方式
 
@@ -50,6 +51,7 @@ Chrome Dev + End Task 版本。一鍵終止分頁 process，釋放記憶體與 C
 
 - **Chrome Dev**：完整支援
 - **Edge Dev**：完整支援
+- **Chromium（開發版）**：若含 `chrome.processes` API 則支援
 - **Chrome 穩定版 / Brave**：`chrome.processes` API 不支援，會顯示錯誤訊息，無法使用
 
 ## 自訂快捷鍵
@@ -71,5 +73,9 @@ Chrome Dev + End Task 版本。一鍵終止分頁 process，釋放記憶體與 C
 │   ├── icon16.png
 │   ├── icon48.png
 │   └── icon128.png
+├── test-load/       # 載入測試用（無 processes API，用於偵錯）
+│   ├── manifest.json
+│   ├── background.js
+│   └── popup.html
 └── README.md
 ```

@@ -72,6 +72,8 @@ function showTabList() {
   batchActions?.classList.remove('hidden');
 }
 
+const FAVICON_PLACEHOLDER = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect fill="%23ccc" width="16" height="16"/></svg>';
+
 function getFaviconUrl(url) {
   try {
     const urlObj = new URL(url);
@@ -92,10 +94,13 @@ function createTabItem(tab, isTerminated = false, storedInfo = null) {
   const favicon = document.createElement('img');
   favicon.className = 'tab-favicon';
   favicon.loading = 'lazy';
-  favicon.src = tab.favIconUrl || getFaviconUrl(displayUrl);
+  favicon.src = FAVICON_PLACEHOLDER;
+  const faviconUrl = tab.favIconUrl || getFaviconUrl(displayUrl) || '';
+  if (faviconUrl) favicon.dataset.faviconUrl = faviconUrl;
   favicon.alt = '';
   favicon.onerror = () => {
-    favicon.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect fill="%23ccc" width="16" height="16"/></svg>';
+    favicon.src = FAVICON_PLACEHOLDER;
+    delete favicon.dataset.faviconUrl;
   };
 
   const info = document.createElement('div');
@@ -115,9 +120,6 @@ function createTabItem(tab, isTerminated = false, storedInfo = null) {
   const btn = document.createElement('button');
   btn.className = isTerminated ? 'restore-btn' : 'end-task-btn';
   btn.textContent = isTerminated ? 'Restore' : 'End Task';
-  btn.onclick = isTerminated
-    ? () => restoreTab(tab.id, item)
-    : () => endTask(tab.id, item, tab);
 
   item.appendChild(favicon);
   item.appendChild(info);
@@ -138,13 +140,12 @@ async function restoreTab(tabId, itemEl) {
     btn.className = 'end-task-btn';
     btn.textContent = 'End Task';
     btn.disabled = false;
-    btn.onclick = () => endTask(tabId, itemEl, tab);
     const titleEl = itemEl.querySelector('.tab-title');
     const urlEl = itemEl.querySelector('.tab-url');
     const faviconEl = itemEl.querySelector('.tab-favicon');
     if (titleEl) titleEl.textContent = tab.title || '(無標題)';
     if (urlEl) urlEl.textContent = tab.url || '';
-    if (faviconEl) faviconEl.src = tab.favIconUrl || getFaviconUrl(tab.url);
+    if (faviconEl) faviconEl.src = tab.favIconUrl || getFaviconUrl(tab.url) || FAVICON_PLACEHOLDER;
   } catch (err) {
     btn.disabled = false;
     btn.textContent = 'Restore';
@@ -173,7 +174,6 @@ async function endTask(tabId, itemEl, tab) {
       btn.className = 'restore-btn';
       btn.textContent = 'Restore';
       btn.disabled = false;
-      btn.onclick = () => restoreTab(tabId, itemEl);
     } else {
       btn.disabled = false;
       btn.textContent = 'End Task';
@@ -188,7 +188,6 @@ async function endTask(tabId, itemEl, tab) {
       btn.className = 'restore-btn';
       btn.textContent = 'Restore';
       btn.disabled = false;
-      btn.onclick = () => restoreTab(tabId, itemEl);
     } else {
       btn.disabled = false;
       btn.textContent = 'End Task';
@@ -254,7 +253,17 @@ async function loadTabs() {
   emptyState.classList.add('hidden');
 
   try {
-    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const [tabs, terminatedDataRaw, { autoEndTask }] = await Promise.all([
+      chrome.tabs.query({ currentWindow: true }),
+      storage.get(),
+      chrome.storage.local.get('autoEndTask'),
+    ]);
+
+    const terminatedTabs = terminatedDataRaw && typeof terminatedDataRaw === 'object' ? terminatedDataRaw : {};
+    const tabIds = new Set(tabs.map((t) => String(t.id)));
+    const validTerminated = Object.fromEntries(
+      Object.entries(terminatedTabs).filter(([id]) => tabIds.has(id))
+    );
 
     const isCrashed = (tab) =>
       tab.url?.startsWith('chrome://crash') ||
@@ -276,54 +285,65 @@ async function loadTabs() {
 
     const fragment = document.createDocumentFragment();
     for (const tab of filteredTabs) {
-      fragment.appendChild(createTabItem(tab, false, null));
+      const storedInfo = validTerminated[String(tab.id)];
+      fragment.appendChild(createTabItem(tab, !!storedInfo, storedInfo));
     }
     tabList.innerHTML = '';
     tabList.appendChild(fragment);
     showTabList();
 
-    storage.get().then((terminatedData) => {
-      const terminatedTabs = terminatedData && typeof terminatedData === 'object' ? terminatedData : {};
-      const tabIds = new Set(tabs.map((t) => String(t.id)));
-      const validTerminated = Object.fromEntries(
-        Object.entries(terminatedTabs).filter(([id]) => tabIds.has(id))
-      );
-      for (const item of tabList.querySelectorAll('.tab-item')) {
-        const tabId = item.dataset.tabId;
-        const storedInfo = validTerminated[tabId];
-        if (storedInfo) {
-          const btn = item.querySelector('.end-task-btn, .restore-btn');
-          const tab = filteredTabs.find((t) => String(t.id) === tabId);
-          if (btn && tab) {
-            btn.className = 'restore-btn';
-            btn.textContent = 'Restore';
-            btn.onclick = () => restoreTab(tab.id, item);
-          }
-          const titleEl = item.querySelector('.tab-title');
-          const urlEl = item.querySelector('.tab-url');
-          if (titleEl) titleEl.textContent = storedInfo.title || '(無標題)';
-          if (urlEl) urlEl.textContent = storedInfo.url || '';
-        }
-      }
-    });
+    observeFavicons(tabList);
+    scheduleDeferredInit(autoEndTask);
   } catch (err) {
     showError(`載入分頁失敗：${err.message}`);
   }
 }
 
-async function loadAutoEndSettings() {
+function observeFavicons(container) {
+  const favicons = container.querySelectorAll('.tab-favicon');
+  const toObserve = [];
+  for (const el of favicons) {
+    if (el.dataset.faviconUrl) toObserve.push(el);
+  }
+  if (toObserve.length === 0) return;
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const img = entry.target;
+        const url = img.dataset.faviconUrl;
+        if (url) {
+          img.src = url;
+          delete img.dataset.faviconUrl;
+          observer.unobserve(img);
+        }
+      }
+    },
+    { root: container, rootMargin: '50px', threshold: 0 }
+  );
+  toObserve.forEach((el) => observer.observe(el));
+}
+
+function scheduleDeferredInit(autoEndTask) {
+  const run = () => {
+    loadShortcutInfo();
+    applyAutoEndSettings(autoEndTask);
+  };
+  if (typeof requestIdleCallback !== 'undefined') {
+    requestIdleCallback(run, { timeout: 100 });
+  } else {
+    setTimeout(run, 0);
+  }
+}
+
+function applyAutoEndSettings(autoEndTask) {
   const enabledEl = document.getElementById('auto-end-enabled');
   const minutesEl = document.getElementById('auto-end-minutes');
   if (!enabledEl || !minutesEl) return;
-  try {
-    const { autoEndTask } = await chrome.storage.local.get('autoEndTask');
-    const { enabled = false, idleMinutes = 15 } = autoEndTask || {};
-    enabledEl.checked = enabled;
-    minutesEl.value = Math.min(120, Math.max(1, idleMinutes));
-  } catch {
-    enabledEl.checked = false;
-    minutesEl.value = 15;
-  }
+  const { enabled = false, idleMinutes = 15 } = autoEndTask || {};
+  enabledEl.checked = enabled;
+  minutesEl.value = Math.min(120, Math.max(1, idleMinutes));
 }
 
 function saveAutoEndSettings() {
@@ -362,12 +382,22 @@ function openShortcutSettings() {
   chrome.tabs.create({ url });
 }
 
+function handleTabListClick(e) {
+  const btn = e.target.closest('.end-task-btn, .restore-btn');
+  if (!btn || btn.disabled) return;
+  const item = e.target.closest('.tab-item');
+  if (!item) return;
+  const tabId = parseInt(item.dataset.tabId, 10);
+  if (btn.classList.contains('restore-btn')) {
+    restoreTab(tabId, item);
+  } else {
+    chrome.tabs.get(tabId).then((tab) => endTask(tabId, item, tab)).catch(() => {});
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  requestAnimationFrame(() => {
-    loadTabs();
-    loadShortcutInfo();
-    loadAutoEndSettings();
-  });
+  loadTabs();
+  tabList.addEventListener('click', handleTabListClick);
   document.getElementById('open-shortcut-settings')?.addEventListener('click', openShortcutSettings);
   document.getElementById('auto-end-enabled')?.addEventListener('change', saveAutoEndSettings);
   document.getElementById('auto-end-minutes')?.addEventListener('change', saveAutoEndSettings);

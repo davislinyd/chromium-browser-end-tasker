@@ -3,13 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chrome Dev End Tasker</title>
+  <title>End Task</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:14px;color:#333;background:#f5f5f5;min-width:400px;max-width:400px;max-height:600px}
+    .container{display:flex;flex-direction:column;min-height:200px;max-height:600px}
+    .header{padding:16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-shrink:0}
+    .title{font-size:18px;font-weight:600;color:#1a1a1a;margin-bottom:4px}
+    .subtitle{font-size:12px;color:#666}
+    .loading-state{padding:24px;text-align:center;color:#888;font-size:13px}
+    .tab-list{flex:1;overflow-y:auto;padding:8px;max-height:450px}
+    .hidden{display:none!important}
+  </style>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="container">
     <header class="header">
-      <h1 class="title">Chrome Dev End Tasker</h1>
+      <h1 class="title">End Task</h1>
       <p class="subtitle">選擇分頁並終止其 process 以釋放資源</p>
       <div class="auto-end-settings">
         <div class="auto-end-top-row">

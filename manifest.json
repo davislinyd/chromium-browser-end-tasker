@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Chrome Dev End Tasker",
+  "name": "End Task",
   "version": "1.0.0",
   "description": "一鍵終止分頁 process，釋放記憶體與 CPU 資源",
   "permissions": ["alarms","processes","storage","tabs"],
@@ -11,7 +11,7 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "Chrome Dev End Tasker"
+    "default_title": "End Task"
   },
   "commands": {
     "_execute_action": {

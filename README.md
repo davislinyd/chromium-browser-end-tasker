@@ -1,0 +1,75 @@
+# Chrome Dev End Tasker
+
+Chrome Dev + End Task 版本。一鍵終止分頁 process，釋放記憶體與 CPU 資源。等同於 Chrome Task Manager 的 End Task 功能。
+
+## 功能
+
+### 終止與恢復分頁
+
+- **End Task**：終止選定分頁的 process，釋放記憶體與 CPU
+- **Restore**：恢復已終止的分頁（會重新載入該頁面）
+- **End Task All**：一次終止所有非作用中分頁
+- **Restore All**：一次恢復所有已終止的分頁
+
+### 自動 End Task
+
+- 啟用後，閒置超過指定分鐘數的分頁會自動被終止
+- 可設定閒置時間（1–120 分鐘）
+- 每分鐘檢查一次
+
+### 快捷鍵
+
+- **終止當前分頁**：`Cmd+E`（macOS）/ `Ctrl+E`（Windows、Linux）— 預設
+- **開啟擴充功能**：無預設，請至 `chrome://extensions/shortcuts` 或 `edge://extensions/shortcuts` 自行設定（如 `Cmd+Shift+E`，部分瀏覽器可能保留此組合）
+
+### 操作方式
+
+- 點擊工具列圖示開啟 popup，選擇分頁後按「End Task」
+- 使用快捷鍵終止當前分頁
+- popup 內可設定自動 End Task 與閒置分鐘數
+
+## 安裝方式
+
+### Chrome Dev
+
+1. 安裝 [Chrome Dev](https://www.google.com/chrome/dev/)
+2. 前往 `chrome://extensions`
+3. 開啟右上角「開發人員模式」
+4. 點擊「載入未封裝項目」
+5. 選擇本專案資料夾
+
+### Edge Dev
+
+1. 安裝 [Edge Dev](https://www.microsoft.com/edge/download/insider)
+2. 前往 `edge://extensions`
+3. 開啟「開發人員模式」
+4. 點擊「載入未封裝項目」
+5. 選擇本專案資料夾
+
+## 相容性
+
+- **Chrome Dev**：完整支援
+- **Edge Dev**：完整支援
+- **Chrome 穩定版 / Brave**：`chrome.processes` API 不支援，會顯示錯誤訊息，無法使用
+
+## 自訂快捷鍵
+
+前往 `chrome://extensions/shortcuts`（Chrome）或 `edge://extensions/shortcuts`（Edge）可自訂：
+
+- **Activate the extension**：開啟擴充功能 popup
+- **終止當前分頁的 process**：終止目前分頁
+
+## 專案結構
+
+```
+├── manifest.json    # 擴充功能設定
+├── popup.html       # popup 介面
+├── popup.js         # popup 邏輯
+├── popup.css        # popup 樣式
+├── background.js    # Service Worker（快捷鍵、自動 End Task）
+├── icons/           # 圖示
+│   ├── icon16.png
+│   ├── icon48.png
+│   └── icon128.png
+└── README.md
+```

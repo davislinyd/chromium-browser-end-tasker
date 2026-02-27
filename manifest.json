@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Chrome Dev End Tasker",
+  "version": "1.0.0",
+  "description": "一鍵終止分頁 process，釋放記憶體與 CPU 資源",
+  "permissions": ["alarms","processes","storage","tabs"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Chrome Dev End Tasker"
+  },
+  "commands": {
+    "_execute_action": {
+      "description": "Activate the extension"
+    },
+    "end-current-tab": {
+      "suggested_key": {
+        "default": "Ctrl+E",
+        "mac": "Command+E"
+      },
+      "description": "終止當前分頁的 process"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

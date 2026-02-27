@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chrome Dev End Tasker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1 class="title">Chrome Dev End Tasker</h1>
+      <p class="subtitle">選擇分頁並終止其 process 以釋放資源</p>
+      <div class="auto-end-settings">
+        <div class="auto-end-top-row">
+          <label class="auto-end-toggle">
+            <input type="checkbox" id="auto-end-enabled" />
+            <span>啟用自動 End Task</span>
+          </label>
+          <div id="batch-actions" class="batch-actions hidden">
+            <button id="end-task-all" class="end-task-all-btn">End Task All</button>
+            <button id="restore-all" class="restore-all-btn">Restore All</button>
+          </div>
+        </div>
+        <div class="auto-end-input-row">
+          <label for="auto-end-minutes">閒置</label>
+          <input type="number" id="auto-end-minutes" min="1" max="120" value="15" />
+          <span class="auto-end-unit">分鐘</span>
+        </div>
+      </div>
+    </header>
+
+    <div id="error-message" class="error-message hidden">chrome.processes API 不支援。請使用 Chrome Dev channel。</div>
+
+    <div id="empty-state" class="empty-state hidden">
+      目前沒有可操作的分頁。
+    </div>
+
+    <div id="tab-list" class="tab-list"></div>
+
+    <footer class="footer">
+      <span id="shortcut-display" class="shortcut-hint">快捷鍵：載入中...</span>
+      <button id="open-shortcut-settings" class="settings-btn">設定快捷鍵</button>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

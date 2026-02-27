@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "End Tasker 載入測試",
+  "version": "1.0.0",
+  "permissions": ["storage", "tabs"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Test"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

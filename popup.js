@@ -325,6 +325,96 @@ function observeFavicons(container) {
   toObserve.forEach((el) => observer.observe(el));
 }
 
+const WHITELIST_KEY = 'whitelist';
+
+async function loadWhitelist() {
+  const { whitelist } = await chrome.storage.local.get(WHITELIST_KEY);
+  const list = Array.isArray(whitelist) ? whitelist : [];
+  renderWhitelistList(list);
+}
+
+function renderWhitelistList(list) {
+  const listEl = document.getElementById('whitelist-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  for (const item of list) {
+    const li = document.createElement('li');
+    li.className = 'whitelist-item';
+    const text = document.createElement('span');
+    text.className = 'whitelist-item-text';
+    text.textContent = item;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'whitelist-remove-btn';
+    removeBtn.textContent = '刪除';
+    removeBtn.dataset.pattern = item;
+    removeBtn.addEventListener('click', () => removeFromWhitelist(item));
+    li.appendChild(text);
+    li.appendChild(removeBtn);
+    listEl.appendChild(li);
+  }
+}
+
+async function addToWhitelist(pattern) {
+  const trimmed = (pattern || '').trim();
+  if (!trimmed) return;
+  const { whitelist } = await chrome.storage.local.get(WHITELIST_KEY);
+  const list = Array.isArray(whitelist) ? [...whitelist] : [];
+  if (list.includes(trimmed)) return;
+  list.push(trimmed);
+  await chrome.storage.local.set({ [WHITELIST_KEY]: list });
+  renderWhitelistList(list);
+}
+
+async function addMultipleToWhitelist(text) {
+  const lines = (text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return;
+  const { whitelist } = await chrome.storage.local.get(WHITELIST_KEY);
+  const list = Array.isArray(whitelist) ? [...whitelist] : [];
+  const existing = new Set(list);
+  for (const line of lines) {
+    if (!existing.has(line)) {
+      list.push(line);
+      existing.add(line);
+    }
+  }
+  if (list.length > (Array.isArray(whitelist) ? whitelist.length : 0)) {
+    await chrome.storage.local.set({ [WHITELIST_KEY]: list });
+    renderWhitelistList(list);
+  }
+}
+
+async function removeFromWhitelist(pattern) {
+  const { whitelist } = await chrome.storage.local.get(WHITELIST_KEY);
+  const list = Array.isArray(whitelist) ? whitelist.filter((p) => p !== pattern) : [];
+  await chrome.storage.local.set({ [WHITELIST_KEY]: list });
+  renderWhitelistList(list);
+}
+
+function setupWhitelistUI() {
+  const toggleBtn = document.getElementById('whitelist-toggle');
+  const contentEl = document.getElementById('whitelist-content');
+  const inputEl = document.getElementById('whitelist-input');
+  const addBtn = document.getElementById('whitelist-add');
+
+  if (toggleBtn && contentEl) {
+    toggleBtn.addEventListener('click', () => {
+      const expanded = contentEl.classList.toggle('hidden');
+      toggleBtn.textContent = expanded ? '展開' : '收合';
+      toggleBtn.setAttribute('aria-expanded', String(!expanded));
+    });
+  }
+
+  const doAdd = () => {
+    if (inputEl?.value) {
+      addMultipleToWhitelist(inputEl.value);
+      inputEl.value = '';
+    }
+  };
+
+  if (addBtn) addBtn.addEventListener('click', doAdd);
+}
+
 function scheduleDeferredInit(autoEndTask) {
   const run = () => {
     loadShortcutInfo();
@@ -397,6 +487,8 @@ function handleTabListClick(e) {
 
 document.addEventListener('DOMContentLoaded', () => {
   loadTabs();
+  loadWhitelist();
+  setupWhitelistUI();
   tabList.addEventListener('click', handleTabListClick);
   document.getElementById('open-shortcut-settings')?.addEventListener('click', openShortcutSettings);
   document.getElementById('auto-end-enabled')?.addEventListener('change', saveAutoEndSettings);

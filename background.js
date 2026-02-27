@@ -21,6 +21,27 @@ const terminatedStorage = sessionStorage
       },
     };
 
+function isWhitelisted(url, patterns) {
+  if (!url || !Array.isArray(patterns) || patterns.length === 0) return false;
+  const trimmed = patterns.map((p) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean);
+  for (const pattern of trimmed) {
+    const isUrlPattern = pattern.includes('://') || pattern.toLowerCase().startsWith('http');
+    if (isUrlPattern) {
+      if (url.startsWith(pattern)) return true;
+    } else {
+      try {
+        const urlObj = new URL(url);
+        const host = urlObj.host.toLowerCase();
+        const p = pattern.toLowerCase();
+        if (host === p || host.endsWith('.' + p)) return true;
+      } catch {
+        // Invalid URL, skip
+      }
+    }
+  }
+  return false;
+}
+
 async function ensureAlarm() {
   const alarm = await chrome.alarms.get('auto-end-task');
   if (!alarm) {
@@ -31,13 +52,14 @@ async function ensureAlarm() {
 async function runAutoEndTask() {
   if (!chrome.processes) return;
 
-  const { autoEndTask } = await chrome.storage.local.get('autoEndTask');
+  const { autoEndTask, whitelist } = await chrome.storage.local.get(['autoEndTask', 'whitelist']);
   const { enabled = false, idleMinutes = 15 } = autoEndTask || {};
   if (!enabled) return;
 
   const idleMs = idleMinutes * 60 * 1000;
   const now = Date.now();
   const terminated = await terminatedStorage.get();
+  const patterns = Array.isArray(whitelist) ? whitelist : [];
 
   const tabs = await chrome.tabs.query({});
   const canTerminate = (tab) =>
@@ -47,7 +69,8 @@ async function runAutoEndTask() {
     now - tab.lastAccessed > idleMs &&
     !tab.url?.startsWith('chrome://') &&
     !tab.url?.startsWith('brave://') &&
-    !tab.url?.startsWith('edge://');
+    !tab.url?.startsWith('edge://') &&
+    !isWhitelisted(tab.url, patterns);
 
   const toTerminate = tabs.filter(
     (tab) => canTerminate(tab) && !terminated[String(tab.id)]

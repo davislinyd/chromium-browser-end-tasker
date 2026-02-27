@@ -39,6 +39,20 @@
           <span class="auto-end-unit">分鐘</span>
         </div>
       </div>
+      <div class="whitelist-section">
+        <div class="whitelist-header">
+          <span class="whitelist-title">白名單（僅對自動 End Task 生效）</span>
+          <button type="button" id="whitelist-toggle" class="whitelist-toggle" aria-expanded="false">展開</button>
+        </div>
+        <div id="whitelist-content" class="whitelist-content hidden">
+          <p class="whitelist-hint">可輸入 domain（如 example.com）、FQDN（如 mail.example.com）或完整 URL（如 https://example.com/page）</p>
+          <div class="whitelist-add-row">
+            <textarea id="whitelist-input" class="whitelist-input" placeholder="一行一個，支援換行輸入多個" rows="3"></textarea>
+            <button type="button" id="whitelist-add" class="whitelist-add-btn">新增</button>
+          </div>
+          <ul id="whitelist-list" class="whitelist-list"></ul>
+        </div>
+      </div>
     </header>
 
     <div id="error-message" class="error-message hidden">chrome.processes API 不支援。請使用 Chrome Dev channel。</div>

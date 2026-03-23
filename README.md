@@ -11,7 +11,7 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 - **End Task All**：一次終止所有非作用中分頁
 - **Restore All**：一次恢復所有已終止的分頁
 
-終止 **http / https** 分頁前，擴充功能會嘗試在該頁的 `document.title` 前加上 💤，方便在分頁列辨識已 End Task 的分頁；**Restore** 重新載入後標題會恢復為網站標題。無法注入腳本的頁面仍會照常終止 process，但分頁列可能沒有前綴。
+終止 **http / https** 分頁前，擴充功能會嘗試在該頁的 `document.title` 前加上 ♻️，方便在分頁列辨識已 End Task 的分頁；**Restore** 重新載入後標題會恢復為網站標題。無法注入腳本的頁面仍會照常終止 process，但分頁列可能沒有前綴。
 
 ### 自動 End Task
 
@@ -73,7 +73,7 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 ├── popup.js         # popup 邏輯
 ├── popup.css        # popup 樣式
 ├── background.js       # Service Worker（快捷鍵、自動 End Task）
-├── prefix-tab-title.js # 終止前為分頁標題加上 💤 前綴（僅 popup 載入；SW 內嵌相同邏輯）
+├── prefix-tab-title.js # 終止前為分頁標題加上 ♻️ 前綴（僅 popup 載入；SW 內嵌相同邏輯）
 ├── icons/           # 圖示
 │   ├── icon16.png
 │   ├── icon48.png

@@ -1,4 +1,4 @@
-const TITLE_PREFIX_MARK = '\uD83D\uDCA4 ';
+const TITLE_PREFIX_MARK = '\u267B\uFE0F ';
 
 async function prefixTabTitleWithMarker(tabId, url) {
   if (!chrome.scripting) return;

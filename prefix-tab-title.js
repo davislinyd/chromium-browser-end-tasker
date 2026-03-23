@@ -1,7 +1,7 @@
-const TITLE_PREFIX_MARK = '\uD83D\uDCA4 ';
+const TITLE_PREFIX_MARK = '\u267B\uFE0F ';
 
 /**
- * 在終止 process 前於分頁將 document.title 加上 💤 前綴（僅 http/https）。
+ * 在終止 process 前於分頁將 document.title 加上 ♻️ 前綴（僅 http/https）。
  * 注入失敗不拋錯，不阻擋後續 terminate。
  * @param {number} tabId
  * @param {string|undefined} [url] 若已持有 tab.url 可傳入以避免多一次 tabs.get

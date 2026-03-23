@@ -1,3 +1,5 @@
+importScripts('prefix-tab-title.js');
+
 const STORAGE_KEY = 'terminatedTabs';
 const sessionStorage = chrome?.storage?.session;
 const terminatedStorage = sessionStorage
@@ -78,6 +80,7 @@ async function runAutoEndTask() {
 
   for (const tab of toTerminate) {
     try {
+      await prefixTabTitleWithEndMarker(tab.id, tab.url);
       const processId = await chrome.processes.getProcessIdForTab(tab.id);
       await chrome.processes.terminate(processId);
       await terminatedStorage.setTab(tab.id, {
@@ -122,6 +125,7 @@ chrome.commands.onCommand.addListener(async (command) => {
         return;
       }
 
+      await prefixTabTitleWithEndMarker(tab.id, tab.url);
       const processId = await chrome.processes.getProcessIdForTab(tab.id);
       await chrome.processes.terminate(processId);
     } catch (err) {

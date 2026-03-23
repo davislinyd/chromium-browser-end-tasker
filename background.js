@@ -1,6 +1,6 @@
-const TITLE_PREFIX_END = '\uD83D\uDD1A ';
+const TITLE_PREFIX_MARK = '\uD83D\uDCA4 ';
 
-async function prefixTabTitleWithEndMarker(tabId, url) {
+async function prefixTabTitleWithMarker(tabId, url) {
   if (!chrome.scripting) return;
 
   let resolvedUrl = url;
@@ -28,10 +28,10 @@ async function prefixTabTitleWithEndMarker(tabId, url) {
         if (t.startsWith(prefix)) return;
         document.title = prefix + t;
       },
-      args: [TITLE_PREFIX_END],
+      args: [TITLE_PREFIX_MARK],
     });
   } catch (err) {
-    console.warn('prefixTabTitleWithEndMarker failed:', err);
+    console.warn('prefixTabTitleWithMarker failed:', err);
   }
 }
 
@@ -115,7 +115,7 @@ async function runAutoEndTask() {
 
   for (const tab of toTerminate) {
     try {
-      await prefixTabTitleWithEndMarker(tab.id, tab.url);
+      await prefixTabTitleWithMarker(tab.id, tab.url);
       const processId = await chrome.processes.getProcessIdForTab(tab.id);
       await chrome.processes.terminate(processId);
       await terminatedStorage.setTab(tab.id, {
@@ -160,7 +160,7 @@ chrome.commands.onCommand.addListener(async (command) => {
         return;
       }
 
-      await prefixTabTitleWithEndMarker(tab.id, tab.url);
+      await prefixTabTitleWithMarker(tab.id, tab.url);
       const processId = await chrome.processes.getProcessIdForTab(tab.id);
       await chrome.processes.terminate(processId);
     } catch (err) {

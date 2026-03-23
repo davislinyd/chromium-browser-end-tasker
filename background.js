@@ -1,4 +1,39 @@
-importScripts('prefix-tab-title.js');
+const TITLE_PREFIX_END = '\uD83D\uDD1A ';
+
+async function prefixTabTitleWithEndMarker(tabId, url) {
+  if (!chrome.scripting) return;
+
+  let resolvedUrl = url;
+  if (resolvedUrl === undefined) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      resolvedUrl = tab.url;
+    } catch {
+      return;
+    }
+  }
+
+  if (
+    !resolvedUrl ||
+    (!resolvedUrl.startsWith('http://') && !resolvedUrl.startsWith('https://'))
+  ) {
+    return;
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (prefix) => {
+        const t = document.title || '';
+        if (t.startsWith(prefix)) return;
+        document.title = prefix + t;
+      },
+      args: [TITLE_PREFIX_END],
+    });
+  } catch (err) {
+    console.warn('prefixTabTitleWithEndMarker failed:', err);
+  }
+}
 
 const STORAGE_KEY = 'terminatedTabs';
 const sessionStorage = chrome?.storage?.session;

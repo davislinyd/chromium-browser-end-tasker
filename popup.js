@@ -164,7 +164,9 @@ async function endTask(tabId, itemEl, tab) {
   btn.textContent = '終止中...';
 
   try {
-    await prefixTabTitleWithMarker(tabId, tab.url);
+    await prefixTabTitleWithMarker(tabId, tab.url, {
+      maybeHasActiveTabAccess: !!tab.active,
+    });
     const processId = await chrome.processes.getProcessIdForTab(tabId);
     const success = await chrome.processes.terminate(processId);
 

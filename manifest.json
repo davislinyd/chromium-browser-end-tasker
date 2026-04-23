@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "End Task",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "一鍵終止分頁 process，釋放記憶體與 CPU 資源",
-  "permissions": ["alarms", "processes", "scripting", "storage", "tabs"],
+  "permissions": ["activeTab", "alarms", "processes", "scripting", "storage", "tabs"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "action": {
     "default_popup": "popup.html",

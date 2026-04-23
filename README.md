@@ -8,8 +8,8 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 
 - **End Task**：終止選定分頁的 process，釋放記憶體與 CPU
 - **Restore**：恢復已終止的分頁（會重新載入該頁面）
-- **End Task All**：一次終止所有非作用中分頁
-- **Restore All**：一次恢復所有已終止的分頁
+- **End Task All**：一次終止目前視窗中所有可操作分頁（包含作用中分頁）
+- **Restore All**：一次恢復目前視窗中所有已終止的分頁
 
 終止 **http / https** 分頁前，擴充功能會嘗試在該頁的 `document.title` 前加上 ♻️，方便在分頁列辨識已 End Task 的分頁；**Restore** 重新載入後標題會恢復為網站標題。若瀏覽器目前未授予該站點存取權限，或該頁屬於 Chromium 保護頁面（如 Chrome Web Store / Edge Add-ons），則會跳過前綴注入，但仍照常終止 process。
 

@@ -1,124 +1,37 @@
-const TITLE_PREFIX_MARK = '\u267B\uFE0F ';
-const RESTRICTED_HOST_RULES = [
-  { host: 'chromewebstore.google.com' },
-  { host: 'chrome.google.com', pathPrefix: '/webstore' },
-  { host: 'microsoftedge.microsoft.com', pathPrefix: '/addons' },
-];
+importScripts('auto-end-rules.js', 'prefix-tab-title.js');
 
-function getScriptableOriginPattern(url) {
-  try {
-    const parsedUrl = new URL(url);
-    if (!['http:', 'https:'].includes(parsedUrl.protocol)) return null;
-    if (isRestrictedScriptingPage(parsedUrl)) return null;
-    return `${parsedUrl.protocol}//${parsedUrl.host}/*`;
-  } catch {
-    return null;
-  }
-}
+const terminatedStorage = AutoEndRules.getTerminatedTabsStorage();
+const protectedTabStorage = AutoEndRules.getProtectedTabsStorage();
 
-function isRestrictedScriptingPage(parsedUrl) {
-  return RESTRICTED_HOST_RULES.some(
-    ({ host, pathPrefix }) =>
-      parsedUrl.hostname === host &&
-      (pathPrefix === undefined || parsedUrl.pathname.startsWith(pathPrefix))
-  );
-}
-
-async function hasHostAccess(originPattern) {
-  if (!originPattern || !chrome.permissions?.contains) return true;
-
-  try {
-    return await chrome.permissions.contains({ origins: [originPattern] });
-  } catch {
-    return true;
-  }
-}
-
-function isExpectedAccessError(err) {
-  const message = String(err?.message || '');
+function isBuiltInPage(url) {
   return (
-    message.includes('Cannot access contents of the page') ||
-    message.includes('Missing host permission for the tab') ||
-    message.includes('The extensions gallery cannot be scripted')
+    url?.startsWith('chrome://') ||
+    url?.startsWith('brave://') ||
+    url?.startsWith('edge://')
   );
 }
 
-async function prefixTabTitleWithMarker(tabId, url) {
-  if (!chrome.scripting) return;
-
-  let resolvedUrl = url;
-  if (resolvedUrl === undefined) {
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      resolvedUrl = tab.url;
-    } catch {
-      return;
-    }
-  }
-
-  const originPattern = resolvedUrl ? getScriptableOriginPattern(resolvedUrl) : null;
-  if (!originPattern) return;
-
-  if (!(await hasHostAccess(originPattern))) return;
-
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (prefix) => {
-        const t = document.title || '';
-        if (t.startsWith(prefix)) return;
-        document.title = prefix + t;
-      },
-      args: [TITLE_PREFIX_MARK],
-    });
-  } catch (err) {
-    if (isExpectedAccessError(err)) return;
-    console.warn('prefixTabTitleWithMarker failed:', err);
-  }
+function canAutoTerminateTab(tab) {
+  return tab.id && !tab.active && tab.lastAccessed != null && !isBuiltInPage(tab.url);
 }
 
-const STORAGE_KEY = 'terminatedTabs';
-const sessionStorage = chrome?.storage?.session;
-const terminatedStorage = sessionStorage
-  ? {
-      async get() {
-        return sessionStorage.get(null);
-      },
-      async setTab(tabId, data) {
-        await sessionStorage.set({ [String(tabId)]: data });
-      },
-    }
-  : {
-      async get() {
-        const result = await chrome.storage.local.get(STORAGE_KEY);
-        return result[STORAGE_KEY] || {};
-      },
-      async setTab(tabId, data) {
-        const current = await this.get();
-        current[String(tabId)] = data;
-        await chrome.storage.local.set({ [STORAGE_KEY]: current });
-      },
-    };
+async function cleanupStaleProtectedTabs(tabs) {
+  const protectedTabs = await protectedTabStorage.getAll();
+  const validTabIds = new Set((tabs || []).map((tab) => String(tab.id)));
+  let changed = false;
 
-function isWhitelisted(url, patterns) {
-  if (!url || !Array.isArray(patterns) || patterns.length === 0) return false;
-  const trimmed = patterns.map((p) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean);
-  for (const pattern of trimmed) {
-    const isUrlPattern = pattern.includes('://') || pattern.toLowerCase().startsWith('http');
-    if (isUrlPattern) {
-      if (url.startsWith(pattern)) return true;
-    } else {
-      try {
-        const urlObj = new URL(url);
-        const host = urlObj.host.toLowerCase();
-        const p = pattern.toLowerCase();
-        if (host === p || host.endsWith('.' + p)) return true;
-      } catch {
-        // Invalid URL, skip
-      }
+  for (const tabId of Object.keys(protectedTabs)) {
+    if (!validTabIds.has(tabId)) {
+      delete protectedTabs[tabId];
+      changed = true;
     }
   }
-  return false;
+
+  if (changed) {
+    await protectedTabStorage.setAll(protectedTabs);
+  }
+
+  return protectedTabs;
 }
 
 async function ensureAlarm() {
@@ -131,43 +44,48 @@ async function ensureAlarm() {
 async function runAutoEndTask() {
   if (!chrome.processes) return;
 
-  const { autoEndTask, whitelist } = await chrome.storage.local.get(['autoEndTask', 'whitelist']);
-  const { enabled = false, idleMinutes = 15 } = autoEndTask || {};
+  const rules = await AutoEndRules.ensureAutoEndRulesMigrated();
+  const { autoEndTask } = await chrome.storage.local.get('autoEndTask');
+  const { enabled = false, idleMinutes = AutoEndRules.DEFAULT_IDLE_MINUTES } =
+    autoEndTask || {};
   if (!enabled) return;
 
-  const idleMs = idleMinutes * 60 * 1000;
   const now = Date.now();
-  const terminated = await terminatedStorage.get();
-  const patterns = Array.isArray(whitelist) ? whitelist : [];
-
+  const terminatedTabs = await terminatedStorage.getAll();
   const tabs = await chrome.tabs.query({});
-  const canTerminate = (tab) =>
-    tab.id &&
-    !tab.active &&
-    tab.lastAccessed != null &&
-    now - tab.lastAccessed > idleMs &&
-    !tab.url?.startsWith('chrome://') &&
-    !tab.url?.startsWith('brave://') &&
-    !tab.url?.startsWith('edge://') &&
-    !isWhitelisted(tab.url, patterns);
+  const protectedTabs = await cleanupStaleProtectedTabs(tabs);
+  const toTerminate = [];
 
-  const toTerminate = tabs.filter(
-    (tab) => canTerminate(tab) && !terminated[String(tab.id)]
-  );
+  for (const tab of tabs) {
+    if (!canAutoTerminateTab(tab)) continue;
+    if (terminatedTabs[String(tab.id)]) continue;
+
+    const policy = AutoEndRules.resolveAutoEndPolicy(
+      tab,
+      rules,
+      idleMinutes,
+      protectedTabs
+    );
+
+    if (!policy || policy.mode === AutoEndRules.RULE_MODE_NEVER) continue;
+    if (now - tab.lastAccessed <= policy.idleMinutes * 60 * 1000) continue;
+
+    toTerminate.push(tab);
+  }
 
   for (const tab of toTerminate) {
     try {
       await prefixTabTitleWithMarker(tab.id, tab.url);
       const processId = await chrome.processes.getProcessIdForTab(tab.id);
       await chrome.processes.terminate(processId);
-      await terminatedStorage.setTab(tab.id, {
+      await terminatedStorage.setEntry(tab.id, {
         url: tab.url,
         title: tab.title,
       });
     } catch (err) {
       const isProcessNotFound = err?.message?.includes('Process not found');
       if (isProcessNotFound) {
-        await terminatedStorage.setTab(tab.id, {
+        await terminatedStorage.setEntry(tab.id, {
           url: tab.url,
           title: tab.title,
         });
@@ -178,11 +96,29 @@ async function runAutoEndTask() {
   }
 }
 
-ensureAlarm();
+if (!AutoEndRules.hasSessionStorageSupport()) {
+  chrome.runtime.onStartup.addListener(() => {
+    chrome.storage.local.remove(AutoEndRules.PROTECTED_TABS_KEY);
+  });
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  protectedTabStorage.removeEntry(tabId).catch(() => {});
+});
+
+AutoEndRules.ensureAutoEndRulesMigrated().catch((err) => {
+  console.error('Failed to initialize auto end rules:', err);
+});
+
+ensureAlarm().catch((err) => {
+  console.error('Failed to ensure auto end alarm:', err);
+});
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'auto-end-task') {
-    runAutoEndTask();
+    runAutoEndTask().catch((err) => {
+      console.error('Auto end task run failed:', err);
+    });
   }
 });
 
@@ -197,7 +133,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab) return;
 
-      if (tab.url?.startsWith('chrome://') || tab.url?.startsWith('brave://') || tab.url?.startsWith('edge://')) {
+      if (isBuiltInPage(tab.url)) {
         console.warn('Cannot terminate built-in pages');
         return;
       }

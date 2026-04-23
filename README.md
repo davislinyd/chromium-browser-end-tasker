@@ -16,9 +16,12 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 ### 自動 End Task
 
 - 啟用後，閒置超過指定分鐘數的分頁會自動被終止
-- 可設定閒置時間（1–120 分鐘）
+- 可設定預設閒置時間（1–120 分鐘）
+- 可為不同的 `domain`、`FQDN` 或 `URL` 設定不同規則
+- 站點規則可設定為 **Never Close** 或指定分鐘數後自動 End Task
+- 可直接在 popup 的分頁列將單一 tab 設為 **Never Close**
 - 每分鐘檢查一次
-- 白名單：可排除特定網站，使其不受自動終止影響
+- `Never Close` 規則只影響自動 End Task；手動 `End Task` / `End Task All` 仍可強制關閉
 
 ### 快捷鍵
 
@@ -29,7 +32,7 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 
 - 點擊工具列圖示開啟 popup，選擇分頁後按「End Task」
 - 使用快捷鍵終止當前分頁
-- popup 內可設定自動 End Task、閒置分鐘數與白名單
+- popup 內可設定自動 End Task、預設閒置分鐘數、站點規則與單一分頁的 Never Close
 
 ## 安裝方式
 
@@ -56,7 +59,7 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 - **Chromium（開發版）**：若含 `chrome.processes` API 則支援
 - **Chrome 穩定版 / Brave**：`chrome.processes` API 不支援，會顯示錯誤訊息，無法使用
 
-本擴充功能另需 **`scripting`**、**`activeTab`** 與 **`http://*/*`、`https://*/*` 主機權限**，才能在終止前修改分頁標題（僅於執行 End Task 時注入，不讀取網頁內容）。
+本擴充功能另需 **`scripting`**、**`activeTab`** 與 **`http://*/*`、`https://*/*` 主機權限**，才能在終止前修改分頁標題（僅於執行 End Task 時注入，不讀取網頁內容）。舊版白名單會在首次載入新版時自動遷移成站點規則。
 
 ## 自訂快捷鍵
 
@@ -68,17 +71,18 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 ## 專案結構
 
 ```
-├── manifest.json    # 擴充功能設定
-├── popup.html       # popup 介面
-├── popup.js         # popup 邏輯
-├── popup.css        # popup 樣式
+├── manifest.json       # 擴充功能設定
+├── auto-end-rules.js   # 自動 End Task 規則、遷移與共享 storage helper
+├── popup.html          # popup 介面
+├── popup.js            # popup 邏輯
+├── popup.css           # popup 樣式
 ├── background.js       # Service Worker（快捷鍵、自動 End Task）
-├── prefix-tab-title.js # 終止前為分頁標題加上 ♻️ 前綴（僅 popup 載入；SW 內嵌相同邏輯）
-├── icons/           # 圖示
+├── prefix-tab-title.js # 終止前為分頁標題加上 ♻️ 前綴
+├── icons/              # 圖示
 │   ├── icon16.png
 │   ├── icon48.png
 │   └── icon128.png
-├── test-load/       # 載入測試用（無 processes API，用於偵錯）
+├── test-load/          # 載入測試用（無 processes API，用於偵錯）
 │   ├── manifest.json
 │   ├── background.js
 │   └── popup.html

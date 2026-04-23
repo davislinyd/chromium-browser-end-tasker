@@ -1,0 +1,322 @@
+(function () {
+  const AUTO_END_RULES_KEY = 'autoEndRules';
+  const LEGACY_WHITELIST_KEY = 'whitelist';
+  const PROTECTED_TABS_KEY = 'protectedTabs';
+  const TERMINATED_TABS_KEY = 'terminatedTabs';
+  const DEFAULT_IDLE_MINUTES = 15;
+  const RULE_MODE_NEVER = 'never';
+  const RULE_MODE_IDLE = 'idle';
+  const MATCH_TYPE_DOMAIN = 'domain';
+  const MATCH_TYPE_FQDN = 'fqdn';
+  const MATCH_TYPE_URL = 'url';
+  const inMemoryStore = {};
+
+  function hasSessionStorageSupport() {
+    return !!chrome?.storage?.session;
+  }
+
+  function getEphemeralArea() {
+    return chrome?.storage?.session || chrome?.storage?.local || null;
+  }
+
+  function createFallbackArea() {
+    return {
+      async get(key) {
+        return { [key]: inMemoryStore[key] };
+      },
+      async set(entries) {
+        Object.assign(inMemoryStore, entries);
+      },
+      async remove(key) {
+        delete inMemoryStore[key];
+      },
+    };
+  }
+
+  function createObjectStorage(area, key) {
+    const targetArea = area || createFallbackArea();
+    return {
+      async getAll() {
+        const result = await targetArea.get(key);
+        const value = result?.[key];
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      },
+      async setAll(data) {
+        const nextData =
+          data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+        await targetArea.set({ [key]: nextData });
+      },
+      async setEntry(id, value) {
+        const current = await this.getAll();
+        current[String(id)] = value;
+        await this.setAll(current);
+      },
+      async removeEntry(id) {
+        const current = await this.getAll();
+        delete current[String(id)];
+        await this.setAll(current);
+      },
+    };
+  }
+
+  function getTerminatedTabsStorage() {
+    return createObjectStorage(getEphemeralArea(), TERMINATED_TABS_KEY);
+  }
+
+  function getProtectedTabsStorage() {
+    return createObjectStorage(getEphemeralArea(), PROTECTED_TABS_KEY);
+  }
+
+  function clampIdleMinutes(value) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return DEFAULT_IDLE_MINUTES;
+    return Math.min(120, Math.max(1, parsed));
+  }
+
+  function parseMatchType(value) {
+    if (
+      value === MATCH_TYPE_DOMAIN ||
+      value === MATCH_TYPE_FQDN ||
+      value === MATCH_TYPE_URL
+    ) {
+      return value;
+    }
+    return null;
+  }
+
+  function parseRuleMode(value) {
+    if (value === RULE_MODE_NEVER || value === RULE_MODE_IDLE) return value;
+    return null;
+  }
+
+  function normalizePattern(matchType, pattern) {
+    const parsedMatchType = parseMatchType(matchType);
+    if (!parsedMatchType || typeof pattern !== 'string') return null;
+
+    const trimmed = pattern.trim();
+    if (!trimmed) return null;
+
+    if (parsedMatchType === MATCH_TYPE_URL) {
+      if (!/^https?:\/\//i.test(trimmed)) return null;
+      try {
+        const parsedUrl = new URL(trimmed);
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) return null;
+        return parsedUrl.toString();
+      } catch {
+        return null;
+      }
+    }
+
+    const lowered = trimmed.toLowerCase().replace(/^\.+/, '').replace(/\.+$/, '');
+    if (
+      !lowered ||
+      lowered.includes('://') ||
+      lowered.includes('/') ||
+      lowered.includes('?') ||
+      lowered.includes('#') ||
+      /\s/.test(lowered)
+    ) {
+      return null;
+    }
+
+    return lowered;
+  }
+
+  function createRule(rawRule) {
+    const matchType = parseMatchType(rawRule?.matchType);
+    const mode = parseRuleMode(rawRule?.mode);
+    const pattern = normalizePattern(matchType, rawRule?.pattern ?? '');
+    if (!matchType || !mode || !pattern) return null;
+
+    const rule = {
+      id: `${matchType}:${pattern}`,
+      matchType,
+      pattern,
+      mode,
+    };
+
+    if (mode === RULE_MODE_IDLE) {
+      rule.idleMinutes = clampIdleMinutes(rawRule?.idleMinutes);
+    }
+
+    return rule;
+  }
+
+  function normalizeRules(rules) {
+    const map = new Map();
+
+    for (const rawRule of Array.isArray(rules) ? rules : []) {
+      const rule = createRule(rawRule);
+      if (!rule) continue;
+      if (map.has(rule.id)) map.delete(rule.id);
+      map.set(rule.id, rule);
+    }
+
+    return Array.from(map.values());
+  }
+
+  function isLegacyUrlPattern(pattern) {
+    return typeof pattern === 'string' && /^https?:\/\//i.test(pattern.trim());
+  }
+
+  function migrateLegacyWhitelist(whitelist) {
+    return normalizeRules(
+      (Array.isArray(whitelist) ? whitelist : []).map((pattern) => ({
+        matchType: isLegacyUrlPattern(pattern) ? MATCH_TYPE_URL : MATCH_TYPE_DOMAIN,
+        pattern,
+        mode: RULE_MODE_NEVER,
+      }))
+    );
+  }
+
+  function serializeRules(rules) {
+    return JSON.stringify(normalizeRules(rules));
+  }
+
+  async function ensureAutoEndRulesMigrated() {
+    const result = await chrome.storage.local.get([
+      AUTO_END_RULES_KEY,
+      LEGACY_WHITELIST_KEY,
+    ]);
+
+    const existingRules = normalizeRules(result?.[AUTO_END_RULES_KEY]);
+    const legacyWhitelist = Array.isArray(result?.[LEGACY_WHITELIST_KEY])
+      ? result[LEGACY_WHITELIST_KEY]
+      : [];
+
+    if (existingRules.length === 0 && legacyWhitelist.length > 0) {
+      const migratedRules = migrateLegacyWhitelist(legacyWhitelist);
+      await chrome.storage.local.set({ [AUTO_END_RULES_KEY]: migratedRules });
+      await chrome.storage.local.remove(LEGACY_WHITELIST_KEY);
+      return migratedRules;
+    }
+
+    const rawExistingRules = Array.isArray(result?.[AUTO_END_RULES_KEY])
+      ? result[AUTO_END_RULES_KEY]
+      : [];
+
+    if (serializeRules(existingRules) !== JSON.stringify(rawExistingRules)) {
+      await chrome.storage.local.set({ [AUTO_END_RULES_KEY]: existingRules });
+    }
+
+    if (legacyWhitelist.length > 0) {
+      await chrome.storage.local.remove(LEGACY_WHITELIST_KEY);
+    }
+
+    return existingRules;
+  }
+
+  function parseHttpUrl(url) {
+    try {
+      const parsedUrl = new URL(url);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) return null;
+      return parsedUrl;
+    } catch {
+      return null;
+    }
+  }
+
+  function findMatchingRule(url, rules) {
+    const parsedUrl = parseHttpUrl(url);
+    if (!parsedUrl) return null;
+
+    const normalizedRules = normalizeRules(rules);
+    const href = parsedUrl.toString();
+    const host = parsedUrl.hostname.toLowerCase();
+
+    const urlMatches = normalizedRules
+      .filter((rule) => rule.matchType === MATCH_TYPE_URL && href.startsWith(rule.pattern))
+      .sort((a, b) => b.pattern.length - a.pattern.length);
+    if (urlMatches.length > 0) return urlMatches[0];
+
+    const fqdnMatches = normalizedRules.filter(
+      (rule) => rule.matchType === MATCH_TYPE_FQDN && host === rule.pattern
+    );
+    if (fqdnMatches.length > 0) return fqdnMatches[0];
+
+    const domainMatches = normalizedRules
+      .filter(
+        (rule) =>
+          rule.matchType === MATCH_TYPE_DOMAIN &&
+          (host === rule.pattern || host.endsWith(`.${rule.pattern}`))
+      )
+      .sort((a, b) => b.pattern.length - a.pattern.length);
+    if (domainMatches.length > 0) return domainMatches[0];
+
+    return null;
+  }
+
+  function resolveAutoEndPolicy(tab, rules, defaultIdleMinutes, protectedTabs) {
+    if (protectedTabs?.[String(tab?.id)]) {
+      return { mode: RULE_MODE_NEVER, source: 'tab' };
+    }
+
+    const matchedRule = findMatchingRule(tab?.url, rules);
+    if (!matchedRule) {
+      return {
+        mode: RULE_MODE_IDLE,
+        idleMinutes: clampIdleMinutes(defaultIdleMinutes),
+        source: 'default',
+      };
+    }
+
+    if (matchedRule.mode === RULE_MODE_NEVER) {
+      return {
+        mode: RULE_MODE_NEVER,
+        source: 'rule',
+        rule: matchedRule,
+      };
+    }
+
+    return {
+      mode: RULE_MODE_IDLE,
+      idleMinutes: clampIdleMinutes(matchedRule.idleMinutes),
+      source: 'rule',
+      rule: matchedRule,
+    };
+  }
+
+  function getRuleMatchLabel(matchType) {
+    switch (matchType) {
+      case MATCH_TYPE_DOMAIN:
+        return 'Domain';
+      case MATCH_TYPE_FQDN:
+        return 'FQDN';
+      case MATCH_TYPE_URL:
+        return 'URL';
+      default:
+        return 'Rule';
+    }
+  }
+
+  function getRuleModeLabel(rule) {
+    if (rule?.mode === RULE_MODE_NEVER) return 'Never Close';
+    return `${clampIdleMinutes(rule?.idleMinutes)} 分鐘後自動 End Task`;
+  }
+
+  globalThis.AutoEndRules = {
+    AUTO_END_RULES_KEY,
+    DEFAULT_IDLE_MINUTES,
+    LEGACY_WHITELIST_KEY,
+    MATCH_TYPE_DOMAIN,
+    MATCH_TYPE_FQDN,
+    MATCH_TYPE_URL,
+    PROTECTED_TABS_KEY,
+    RULE_MODE_IDLE,
+    RULE_MODE_NEVER,
+    TERMINATED_TABS_KEY,
+    clampIdleMinutes,
+    createRule,
+    ensureAutoEndRulesMigrated,
+    findMatchingRule,
+    getProtectedTabsStorage,
+    getRuleMatchLabel,
+    getRuleModeLabel,
+    getTerminatedTabsStorage,
+    hasSessionStorageSupport,
+    migrateLegacyWhitelist,
+    normalizePattern,
+    normalizeRules,
+    resolveAutoEndPolicy,
+  };
+})();

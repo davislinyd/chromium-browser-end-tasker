@@ -88,26 +88,26 @@ body {
   color: #666;
 }
 
-.whitelist-section {
+.rules-section {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid #e8e8e8;
 }
 
-.whitelist-header {
+.rules-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.whitelist-title {
+.rules-title {
   font-size: 13px;
   font-weight: 500;
   color: #333;
 }
 
-.whitelist-toggle {
+.rules-toggle {
   padding: 2px 8px;
   font-size: 11px;
   color: #1976d2;
@@ -117,31 +117,32 @@ body {
   cursor: pointer;
 }
 
-.whitelist-toggle:hover {
+.rules-toggle:hover {
   background: #1976d2;
   color: #fff;
 }
 
-.whitelist-content {
+.rules-content {
   margin-top: 10px;
 }
 
-.whitelist-hint {
+.rules-hint {
   font-size: 11px;
   color: #888;
   margin-bottom: 8px;
   line-height: 1.4;
 }
 
-.whitelist-add-row {
+.rule-form-row {
   display: flex;
   gap: 8px;
   margin-bottom: 10px;
   align-items: flex-start;
 }
 
-.whitelist-input {
-  flex: 1;
+.rule-select,
+.rule-input,
+.rule-idle-group input {
   min-width: 0;
   padding: 6px 10px;
   font-size: 12px;
@@ -149,15 +150,42 @@ body {
   line-height: 1.5;
   border: 1px solid #ccc;
   border-radius: 4px;
-  resize: vertical;
+  background: #fff;
 }
 
-.whitelist-input:focus {
+.rule-select {
+  flex: 0 0 96px;
+}
+
+.rule-input {
+  flex: 1;
+}
+
+.rule-idle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.rule-idle-group input {
+  width: 56px;
+  flex: 0 0 auto;
+}
+
+.rule-idle-unit {
+  font-size: 12px;
+  color: #666;
+}
+
+.rule-select:focus,
+.rule-input:focus,
+.rule-idle-group input:focus {
   outline: none;
   border-color: #1976d2;
 }
 
-.whitelist-add-btn {
+.rule-add-btn {
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 500;
@@ -168,19 +196,19 @@ body {
   cursor: pointer;
 }
 
-.whitelist-add-btn:hover {
+.rule-add-btn:hover {
   background: #1565c0;
 }
 
-.whitelist-list {
+.rule-list {
   list-style: none;
   max-height: 120px;
   overflow-y: auto;
 }
 
-.whitelist-item {
+.rule-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   padding: 6px 10px;
@@ -190,19 +218,40 @@ body {
   margin-bottom: 4px;
 }
 
-.whitelist-item:last-child {
+.rule-item:last-child {
   margin-bottom: 0;
 }
 
-.whitelist-item-text {
+.rule-item-main {
   flex: 1;
   min-width: 0;
+}
+
+.rule-item-title {
+  display: block;
+  font-size: 12px;
+  color: #1a1a1a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.whitelist-remove-btn {
+.rule-item-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: #666;
+}
+
+.rule-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #888;
+  background: #f8f8f8;
+  border-radius: 4px;
+}
+
+.rule-remove-btn {
   flex-shrink: 0;
   padding: 2px 6px;
   font-size: 11px;
@@ -213,7 +262,7 @@ body {
   cursor: pointer;
 }
 
-.whitelist-remove-btn:hover {
+.rule-remove-btn:hover {
   background: #c62828;
   color: #fff;
 }
@@ -316,6 +365,11 @@ body {
   margin-bottom: 0;
 }
 
+.tab-item-protected {
+  background: #f5fbf5;
+  border: 1px solid #d7ebd8;
+}
+
 .tab-favicon {
   width: 20px;
   height: 20px;
@@ -328,13 +382,30 @@ body {
   min-width: 0;
 }
 
+.tab-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
 .tab-title {
   font-weight: 500;
   color: #1a1a1a;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 2px;
+}
+
+.tab-status-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #2e7d32;
+  background: #e8f5e9;
+  border-radius: 999px;
 }
 
 .tab-url {
@@ -343,6 +414,37 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.protect-toggle-btn {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #2e7d32;
+  background: transparent;
+  border: 1px solid #66bb6a;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.protect-toggle-btn:hover {
+  background: #66bb6a;
+  color: #fff;
+}
+
+.protect-toggle-btn:disabled {
+  color: #888;
+  border-color: #ccc;
+  cursor: not-allowed;
 }
 
 .end-task-btn {

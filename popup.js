@@ -1,54 +1,21 @@
+const terminatedStorage = AutoEndRules.getTerminatedTabsStorage();
+const protectedTabStorage = AutoEndRules.getProtectedTabsStorage();
+
 const errorMessage = document.getElementById('error-message');
 const emptyState = document.getElementById('empty-state');
 const tabList = document.getElementById('tab-list');
 const batchActions = document.getElementById('batch-actions');
 const endTaskAllBtn = document.getElementById('end-task-all');
 const restoreAllBtn = document.getElementById('restore-all');
-
-// chrome.storage.session 在 Chrome 102+ 才支援；不支援時改用 local 以在 popup 關閉後保留狀態
-const STORAGE_KEY = 'terminatedTabs';
-const sessionStorage = chrome?.storage?.session;
-const localStorage = chrome?.storage?.local;
-const storage = sessionStorage
-  ? {
-      async get() {
-        return sessionStorage.get(null);
-      },
-      async set(data) {
-        return sessionStorage.set(data);
-      },
-      async remove(key) {
-        return sessionStorage.remove(key);
-      },
-    }
-  : localStorage
-    ? {
-        async get() {
-          const result = await localStorage.get(STORAGE_KEY);
-          return result[STORAGE_KEY] || {};
-        },
-        async set(data) {
-          const current = await this.get();
-          await localStorage.set({ [STORAGE_KEY]: { ...current, ...data } });
-        },
-        async remove(key) {
-          const current = await this.get();
-          delete current[key];
-          await localStorage.set({ [STORAGE_KEY]: current });
-        },
-      }
-    : {
-        _data: {},
-        async get() {
-          return { ...this._data };
-        },
-        async set(data) {
-          Object.assign(this._data, data);
-        },
-        async remove(key) {
-          delete this._data[key];
-        },
-      };
+const rulesToggleBtn = document.getElementById('rules-toggle');
+const rulesContentEl = document.getElementById('rules-content');
+const ruleMatchTypeEl = document.getElementById('rule-match-type');
+const rulePatternEl = document.getElementById('rule-pattern');
+const ruleModeEl = document.getElementById('rule-mode');
+const ruleIdleGroupEl = document.getElementById('rule-idle-group');
+const ruleIdleMinutesEl = document.getElementById('rule-idle-minutes');
+const ruleAddBtn = document.getElementById('rule-add');
+const ruleListEl = document.getElementById('rule-list');
 
 function showError(message) {
   errorMessage.textContent = message;
@@ -72,7 +39,8 @@ function showTabList() {
   batchActions?.classList.remove('hidden');
 }
 
-const FAVICON_PLACEHOLDER = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect fill="%23ccc" width="16" height="16"/></svg>';
+const FAVICON_PLACEHOLDER =
+  'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect fill="%23ccc" width="16" height="16"/></svg>';
 
 function getFaviconUrl(url) {
   try {
@@ -83,10 +51,19 @@ function getFaviconUrl(url) {
   }
 }
 
-function createTabItem(tab, isTerminated = false, storedInfo = null) {
+function createTabItem(tab, options = {}) {
+  const {
+    isTerminated = false,
+    storedInfo = null,
+    isProtected = false,
+  } = options;
+
   const item = document.createElement('div');
   item.className = 'tab-item';
-  item.dataset.tabId = tab.id;
+  if (isProtected && !isTerminated) {
+    item.classList.add('tab-item-protected');
+  }
+  item.dataset.tabId = String(tab.id);
 
   const displayUrl = storedInfo?.url ?? tab.url ?? '';
   const displayTitle = storedInfo?.title ?? tab.title ?? '(無標題)';
@@ -106,46 +83,76 @@ function createTabItem(tab, isTerminated = false, storedInfo = null) {
   const info = document.createElement('div');
   info.className = 'tab-info';
 
+  const titleRow = document.createElement('div');
+  titleRow.className = 'tab-title-row';
+
   const title = document.createElement('div');
   title.className = 'tab-title';
   title.textContent = displayTitle;
+  titleRow.appendChild(title);
+
+  if (isProtected && !isTerminated) {
+    const badge = document.createElement('span');
+    badge.className = 'tab-status-badge';
+    badge.textContent = 'Never Close';
+    titleRow.appendChild(badge);
+  }
 
   const urlEl = document.createElement('div');
   urlEl.className = 'tab-url';
   urlEl.textContent = displayUrl;
 
-  info.appendChild(title);
+  info.appendChild(titleRow);
   info.appendChild(urlEl);
 
-  const btn = document.createElement('button');
-  btn.className = isTerminated ? 'restore-btn' : 'end-task-btn';
-  btn.textContent = isTerminated ? 'Restore' : 'End Task';
+  const actions = document.createElement('div');
+  actions.className = 'tab-actions';
+
+  if (!isTerminated) {
+    const protectBtn = document.createElement('button');
+    protectBtn.type = 'button';
+    protectBtn.className = 'protect-toggle-btn';
+    protectBtn.dataset.action = isProtected ? 'allow-auto-end' : 'never-close';
+    protectBtn.textContent = isProtected ? 'Allow Auto End' : 'Never Close';
+    actions.appendChild(protectBtn);
+  }
+
+  const primaryBtn = document.createElement('button');
+  primaryBtn.type = 'button';
+  primaryBtn.className = isTerminated ? 'restore-btn' : 'end-task-btn';
+  primaryBtn.dataset.action = isTerminated ? 'restore' : 'end-task';
+  primaryBtn.textContent = isTerminated ? 'Restore' : 'End Task';
+  actions.appendChild(primaryBtn);
 
   item.appendChild(favicon);
   item.appendChild(info);
-  item.appendChild(btn);
+  item.appendChild(actions);
 
   return item;
 }
 
+function replaceTabItem(itemEl, tab, options) {
+  const nextItem = createTabItem(tab, options);
+  itemEl.replaceWith(nextItem);
+  observeFavicons(tabList);
+  return nextItem;
+}
+
 async function restoreTab(tabId, itemEl) {
-  const btn = itemEl.querySelector('.end-task-btn, .restore-btn');
+  const btn = itemEl.querySelector('.restore-btn');
+  if (!btn) return;
+
   btn.disabled = true;
   btn.textContent = '恢復中...';
 
   try {
     await chrome.tabs.reload(tabId);
-    await storage.remove(String(tabId));
+    await terminatedStorage.removeEntry(tabId);
     const tab = await chrome.tabs.get(tabId);
-    btn.className = 'end-task-btn';
-    btn.textContent = 'End Task';
-    btn.disabled = false;
-    const titleEl = itemEl.querySelector('.tab-title');
-    const urlEl = itemEl.querySelector('.tab-url');
-    const faviconEl = itemEl.querySelector('.tab-favicon');
-    if (titleEl) titleEl.textContent = tab.title || '(無標題)';
-    if (urlEl) urlEl.textContent = tab.url || '';
-    if (faviconEl) faviconEl.src = tab.favIconUrl || getFaviconUrl(tab.url) || FAVICON_PLACEHOLDER;
+    const protectedTabs = await protectedTabStorage.getAll();
+    replaceTabItem(itemEl, tab, {
+      isProtected: !!protectedTabs[String(tabId)],
+    });
   } catch (err) {
     btn.disabled = false;
     btn.textContent = 'Restore';
@@ -159,11 +166,14 @@ async function endTask(tabId, itemEl, tab) {
     return;
   }
 
-  const btn = itemEl.querySelector('.end-task-btn, .restore-btn');
+  const btn = itemEl.querySelector('.end-task-btn');
+  if (!btn) return;
+
   btn.disabled = true;
   btn.textContent = '終止中...';
 
   try {
+    const protectedTabs = await protectedTabStorage.getAll();
     await prefixTabTitleWithMarker(tabId, tab.url, {
       maybeHasActiveTabAccess: !!tab.active,
     });
@@ -171,12 +181,13 @@ async function endTask(tabId, itemEl, tab) {
     const success = await chrome.processes.terminate(processId);
 
     if (success) {
-      await storage.set({
-        [String(tabId)]: { url: tab.url, title: tab.title },
+      const storedInfo = { url: tab.url, title: tab.title };
+      await terminatedStorage.setEntry(tabId, storedInfo);
+      replaceTabItem(itemEl, tab, {
+        isTerminated: true,
+        storedInfo,
+        isProtected: !!protectedTabs[String(tabId)],
       });
-      btn.className = 'restore-btn';
-      btn.textContent = 'Restore';
-      btn.disabled = false;
     } else {
       btn.disabled = false;
       btn.textContent = 'End Task';
@@ -185,12 +196,14 @@ async function endTask(tabId, itemEl, tab) {
   } catch (err) {
     const isProcessNotFound = err?.message?.includes('Process not found');
     if (isProcessNotFound) {
-      await storage.set({
-        [String(tabId)]: { url: tab.url, title: tab.title },
+      const protectedTabs = await protectedTabStorage.getAll();
+      const storedInfo = { url: tab.url, title: tab.title };
+      await terminatedStorage.setEntry(tabId, storedInfo);
+      replaceTabItem(itemEl, tab, {
+        isTerminated: true,
+        storedInfo,
+        isProtected: !!protectedTabs[String(tabId)],
       });
-      btn.className = 'restore-btn';
-      btn.textContent = 'Restore';
-      btn.disabled = false;
     } else {
       btn.disabled = false;
       btn.textContent = 'End Task';
@@ -199,16 +212,42 @@ async function endTask(tabId, itemEl, tab) {
   }
 }
 
+async function setTabProtection(tabId, itemEl, shouldProtect) {
+  const btn = itemEl.querySelector('.protect-toggle-btn');
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.textContent = shouldProtect ? '設定中...' : '更新中...';
+
+  try {
+    if (shouldProtect) {
+      await protectedTabStorage.setEntry(tabId, true);
+    } else {
+      await protectedTabStorage.removeEntry(tabId);
+    }
+
+    const tab = await chrome.tabs.get(tabId);
+    replaceTabItem(itemEl, tab, { isProtected: shouldProtect });
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = shouldProtect ? 'Never Close' : 'Allow Auto End';
+    alert(`更新保護狀態失敗：${err.message}`);
+  }
+}
+
 async function endTaskAll() {
   if (!chrome.processes) return;
+
   const items = tabList.querySelectorAll('.tab-item');
   const endTaskItems = [];
   for (const item of items) {
     if (item.querySelector('.end-task-btn')) endTaskItems.push(item);
   }
   if (endTaskItems.length === 0) return;
+
   endTaskAllBtn.disabled = true;
   endTaskAllBtn.textContent = '終止中...';
+
   try {
     for (const item of endTaskItems) {
       const tabId = parseInt(item.dataset.tabId, 10);
@@ -216,7 +255,7 @@ async function endTaskAll() {
         const tab = await chrome.tabs.get(tabId);
         await endTask(tabId, item, tab);
       } catch {
-        // Tab may have been closed or process already gone
+        // Tab may have been closed or process already gone.
       }
     }
   } finally {
@@ -232,8 +271,10 @@ async function restoreAll() {
     if (item.querySelector('.restore-btn')) restoreItems.push(item);
   }
   if (restoreItems.length === 0) return;
+
   restoreAllBtn.disabled = true;
   restoreAllBtn.textContent = '恢復中...';
+
   try {
     await Promise.all(
       restoreItems.map((item) => restoreTab(parseInt(item.dataset.tabId, 10), item))
@@ -256,14 +297,23 @@ async function loadTabs() {
   emptyState.classList.add('hidden');
 
   try {
-    const [tabs, terminatedDataRaw, { autoEndTask }] = await Promise.all([
-      chrome.tabs.query({ currentWindow: true }),
-      storage.get(),
-      chrome.storage.local.get('autoEndTask'),
-    ]);
+    const [tabs, terminatedDataRaw, protectedDataRaw, { autoEndTask }] =
+      await Promise.all([
+        chrome.tabs.query({ currentWindow: true }),
+        terminatedStorage.getAll(),
+        protectedTabStorage.getAll(),
+        chrome.storage.local.get('autoEndTask'),
+      ]);
 
-    const terminatedTabs = terminatedDataRaw && typeof terminatedDataRaw === 'object' ? terminatedDataRaw : {};
-    const tabIds = new Set(tabs.map((t) => String(t.id)));
+    const terminatedTabs =
+      terminatedDataRaw && typeof terminatedDataRaw === 'object'
+        ? terminatedDataRaw
+        : {};
+    const protectedTabs =
+      protectedDataRaw && typeof protectedDataRaw === 'object'
+        ? protectedDataRaw
+        : {};
+    const tabIds = new Set(tabs.map((tab) => String(tab.id)));
     const validTerminated = Object.fromEntries(
       Object.entries(terminatedTabs).filter(([id]) => tabIds.has(id))
     );
@@ -289,7 +339,13 @@ async function loadTabs() {
     const fragment = document.createDocumentFragment();
     for (const tab of filteredTabs) {
       const storedInfo = validTerminated[String(tab.id)];
-      fragment.appendChild(createTabItem(tab, !!storedInfo, storedInfo));
+      fragment.appendChild(
+        createTabItem(tab, {
+          isTerminated: !!storedInfo,
+          storedInfo,
+          isProtected: !!protectedTabs[String(tab.id)],
+        })
+      );
     }
     tabList.innerHTML = '';
     tabList.appendChild(fragment);
@@ -328,100 +384,157 @@ function observeFavicons(container) {
   toObserve.forEach((el) => observer.observe(el));
 }
 
-const WHITELIST_KEY = 'whitelist';
-
-async function loadWhitelist() {
-  const { whitelist } = await chrome.storage.local.get(WHITELIST_KEY);
-  const list = Array.isArray(whitelist) ? whitelist : [];
-  renderWhitelistList(list);
+async function loadAutoEndRules() {
+  const rules = await AutoEndRules.ensureAutoEndRulesMigrated();
+  renderRuleList(rules);
 }
 
-function renderWhitelistList(list) {
-  const listEl = document.getElementById('whitelist-list');
-  if (!listEl) return;
-  listEl.innerHTML = '';
-  for (const item of list) {
-    const li = document.createElement('li');
-    li.className = 'whitelist-item';
-    const text = document.createElement('span');
-    text.className = 'whitelist-item-text';
-    text.textContent = item;
+function renderRuleList(rules) {
+  if (!ruleListEl) return;
+
+  const normalizedRules = AutoEndRules.normalizeRules(rules);
+  ruleListEl.innerHTML = '';
+
+  if (normalizedRules.length === 0) {
+    const emptyItem = document.createElement('li');
+    emptyItem.className = 'rule-empty';
+    emptyItem.textContent = '尚未設定站點規則';
+    ruleListEl.appendChild(emptyItem);
+    return;
+  }
+
+  for (const rule of normalizedRules) {
+    const item = document.createElement('li');
+    item.className = 'rule-item';
+
+    const main = document.createElement('div');
+    main.className = 'rule-item-main';
+
+    const title = document.createElement('span');
+    title.className = 'rule-item-title';
+    title.textContent = `${AutoEndRules.getRuleMatchLabel(rule.matchType)} · ${rule.pattern}`;
+
+    const detail = document.createElement('span');
+    detail.className = 'rule-item-detail';
+    detail.textContent = AutoEndRules.getRuleModeLabel(rule);
+
+    main.appendChild(title);
+    main.appendChild(detail);
+
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
-    removeBtn.className = 'whitelist-remove-btn';
+    removeBtn.className = 'rule-remove-btn';
+    removeBtn.dataset.ruleId = rule.id;
     removeBtn.textContent = '刪除';
-    removeBtn.dataset.pattern = item;
-    removeBtn.addEventListener('click', () => removeFromWhitelist(item));
-    li.appendChild(text);
-    li.appendChild(removeBtn);
-    listEl.appendChild(li);
+
+    item.appendChild(main);
+    item.appendChild(removeBtn);
+    ruleListEl.appendChild(item);
   }
 }
 
-async function addToWhitelist(pattern) {
-  const trimmed = (pattern || '').trim();
-  if (!trimmed) return;
-  const { whitelist } = await chrome.storage.local.get(WHITELIST_KEY);
-  const list = Array.isArray(whitelist) ? [...whitelist] : [];
-  if (list.includes(trimmed)) return;
-  list.push(trimmed);
-  await chrome.storage.local.set({ [WHITELIST_KEY]: list });
-  renderWhitelistList(list);
+function syncRuleModeUi() {
+  if (!ruleModeEl || !ruleIdleGroupEl) return;
+  ruleIdleGroupEl.classList.toggle(
+    'hidden',
+    ruleModeEl.value !== AutoEndRules.RULE_MODE_IDLE
+  );
 }
 
-async function addMultipleToWhitelist(text) {
-  const lines = (text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0) return;
-  const { whitelist } = await chrome.storage.local.get(WHITELIST_KEY);
-  const list = Array.isArray(whitelist) ? [...whitelist] : [];
-  const existing = new Set(list);
-  for (const line of lines) {
-    if (!existing.has(line)) {
-      list.push(line);
-      existing.add(line);
+function getRuleValidationMessage(matchType, pattern, mode, idleMinutes) {
+  if (!pattern.trim()) return '請輸入規則內容。';
+
+  if (!AutoEndRules.normalizePattern(matchType, pattern)) {
+    if (matchType === AutoEndRules.MATCH_TYPE_URL) {
+      return 'URL 規則需輸入完整的 http/https URL。';
+    }
+    return 'Domain / FQDN 規則只接受 host 名稱，請不要包含協定、路徑或查詢字串。';
+  }
+
+  if (mode === AutoEndRules.RULE_MODE_IDLE) {
+    const parsed = Number.parseInt(idleMinutes, 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 120) {
+      return '自動關閉分鐘數需介於 1 到 120。';
     }
   }
-  if (list.length > (Array.isArray(whitelist) ? whitelist.length : 0)) {
-    await chrome.storage.local.set({ [WHITELIST_KEY]: list });
-    renderWhitelistList(list);
+
+  return '';
+}
+
+async function upsertAutoEndRule() {
+  if (!ruleMatchTypeEl || !rulePatternEl || !ruleModeEl || !ruleIdleMinutesEl) return;
+
+  const matchType = ruleMatchTypeEl.value;
+  const pattern = rulePatternEl.value;
+  const mode = ruleModeEl.value;
+  const idleMinutes = ruleIdleMinutesEl.value;
+  const validationMessage = getRuleValidationMessage(
+    matchType,
+    pattern,
+    mode,
+    idleMinutes
+  );
+
+  if (validationMessage) {
+    alert(validationMessage);
+    return;
+  }
+
+  const nextRule = AutoEndRules.createRule({
+    matchType,
+    pattern,
+    mode,
+    idleMinutes,
+  });
+
+  if (!nextRule) {
+    alert('規則格式不正確，請重新確認。');
+    return;
+  }
+
+  const currentRules = await AutoEndRules.ensureAutoEndRulesMigrated();
+  const nextRules = currentRules.filter((rule) => rule.id !== nextRule.id);
+  nextRules.push(nextRule);
+  const normalizedRules = AutoEndRules.normalizeRules(nextRules);
+
+  await chrome.storage.local.set({
+    [AutoEndRules.AUTO_END_RULES_KEY]: normalizedRules,
+  });
+
+  renderRuleList(normalizedRules);
+  rulePatternEl.value = '';
+  if (nextRule.mode === AutoEndRules.RULE_MODE_IDLE) {
+    ruleIdleMinutesEl.value = String(nextRule.idleMinutes);
   }
 }
 
-async function removeFromWhitelist(pattern) {
-  const { whitelist } = await chrome.storage.local.get(WHITELIST_KEY);
-  const list = Array.isArray(whitelist) ? whitelist.filter((p) => p !== pattern) : [];
-  await chrome.storage.local.set({ [WHITELIST_KEY]: list });
-  renderWhitelistList(list);
+async function removeAutoEndRule(ruleId) {
+  const currentRules = await AutoEndRules.ensureAutoEndRulesMigrated();
+  const nextRules = currentRules.filter((rule) => rule.id !== ruleId);
+  await chrome.storage.local.set({
+    [AutoEndRules.AUTO_END_RULES_KEY]: nextRules,
+  });
+  renderRuleList(nextRules);
 }
 
-function setupWhitelistUI() {
-  const toggleBtn = document.getElementById('whitelist-toggle');
-  const contentEl = document.getElementById('whitelist-content');
-  const inputEl = document.getElementById('whitelist-input');
-  const addBtn = document.getElementById('whitelist-add');
-
-  if (toggleBtn && contentEl) {
-    toggleBtn.addEventListener('click', () => {
-      const expanded = contentEl.classList.toggle('hidden');
-      toggleBtn.textContent = expanded ? '展開' : '收合';
-      toggleBtn.setAttribute('aria-expanded', String(!expanded));
+function setupRulesUI() {
+  if (rulesToggleBtn && rulesContentEl) {
+    rulesToggleBtn.addEventListener('click', () => {
+      const isHidden = rulesContentEl.classList.toggle('hidden');
+      rulesToggleBtn.textContent = isHidden ? '展開' : '收合';
+      rulesToggleBtn.setAttribute('aria-expanded', String(!isHidden));
     });
   }
 
-  const doAdd = () => {
-    if (inputEl?.value) {
-      addMultipleToWhitelist(inputEl.value);
-      inputEl.value = '';
-    }
-  };
-
-  if (addBtn) addBtn.addEventListener('click', doAdd);
+  ruleModeEl?.addEventListener('change', syncRuleModeUi);
+  ruleAddBtn?.addEventListener('click', upsertAutoEndRule);
 }
 
 function scheduleDeferredInit(autoEndTask) {
   const run = () => {
     loadShortcutInfo();
     applyAutoEndSettings(autoEndTask);
+    syncRuleModeUi();
   };
   if (typeof requestIdleCallback !== 'undefined') {
     requestIdleCallback(run, { timeout: 100 });
@@ -434,22 +547,25 @@ function applyAutoEndSettings(autoEndTask) {
   const enabledEl = document.getElementById('auto-end-enabled');
   const minutesEl = document.getElementById('auto-end-minutes');
   if (!enabledEl || !minutesEl) return;
-  const { enabled = false, idleMinutes = 15 } = autoEndTask || {};
+  const { enabled = false, idleMinutes = AutoEndRules.DEFAULT_IDLE_MINUTES } =
+    autoEndTask || {};
   enabledEl.checked = enabled;
-  minutesEl.value = Math.min(120, Math.max(1, idleMinutes));
+  minutesEl.value = AutoEndRules.clampIdleMinutes(idleMinutes);
 }
 
 function saveAutoEndSettings() {
   const enabledEl = document.getElementById('auto-end-enabled');
   const minutesEl = document.getElementById('auto-end-minutes');
   if (!enabledEl || !minutesEl) return;
-  const idleMinutes = Math.min(120, Math.max(1, parseInt(minutesEl.value, 10) || 15));
+
+  const idleMinutes = AutoEndRules.clampIdleMinutes(minutesEl.value);
   chrome.storage.local.set({
     autoEndTask: {
       enabled: enabledEl.checked,
       idleMinutes,
     },
   });
+
   if (enabledEl.checked && idleMinutes < 5) {
     alert('閒置分鐘數低於 5 分鐘可能導致分頁頻繁被終止，請謹慎使用。');
   }
@@ -460,7 +576,7 @@ async function loadShortcutInfo() {
   if (!shortcutDisplay) return;
   try {
     const commands = await chrome.commands.getAll();
-    const endTaskCmd = commands.find((c) => c.name === 'end-current-tab');
+    const endTaskCmd = commands.find((command) => command.name === 'end-current-tab');
     shortcutDisplay.textContent = endTaskCmd?.shortcut
       ? `快捷鍵：${endTaskCmd.shortcut}`
       : '快捷鍵：未設定';
@@ -476,24 +592,51 @@ function openShortcutSettings() {
 }
 
 function handleTabListClick(e) {
-  const btn = e.target.closest('.end-task-btn, .restore-btn');
+  const btn = e.target.closest('button[data-action]');
   if (!btn || btn.disabled) return;
+
   const item = e.target.closest('.tab-item');
   if (!item) return;
+
   const tabId = parseInt(item.dataset.tabId, 10);
-  if (btn.classList.contains('restore-btn')) {
-    restoreTab(tabId, item);
-  } else {
-    chrome.tabs.get(tabId).then((tab) => endTask(tabId, item, tab)).catch(() => {});
+  switch (btn.dataset.action) {
+    case 'restore':
+      restoreTab(tabId, item);
+      break;
+    case 'end-task':
+      chrome.tabs
+        .get(tabId)
+        .then((tab) => endTask(tabId, item, tab))
+        .catch(() => {});
+      break;
+    case 'never-close':
+      setTabProtection(tabId, item, true);
+      break;
+    case 'allow-auto-end':
+      setTabProtection(tabId, item, false);
+      break;
+    default:
+      break;
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  loadTabs();
-  loadWhitelist();
-  setupWhitelistUI();
+  AutoEndRules.ensureAutoEndRulesMigrated()
+    .then(() => Promise.all([loadTabs(), loadAutoEndRules()]))
+    .catch((err) => {
+      showError(`初始化設定失敗：${err.message}`);
+    });
+
+  setupRulesUI();
   tabList.addEventListener('click', handleTabListClick);
-  document.getElementById('open-shortcut-settings')?.addEventListener('click', openShortcutSettings);
+  ruleListEl?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.rule-remove-btn');
+    if (!btn?.dataset.ruleId) return;
+    removeAutoEndRule(btn.dataset.ruleId);
+  });
+  document
+    .getElementById('open-shortcut-settings')
+    ?.addEventListener('click', openShortcutSettings);
   document.getElementById('auto-end-enabled')?.addEventListener('change', saveAutoEndSettings);
   document.getElementById('auto-end-minutes')?.addEventListener('change', saveAutoEndSettings);
   endTaskAllBtn?.addEventListener('click', endTaskAll);

@@ -34,23 +34,38 @@
           </div>
         </div>
         <div class="auto-end-input-row">
-          <label for="auto-end-minutes">閒置</label>
+          <label for="auto-end-minutes">預設閒置</label>
           <input type="number" id="auto-end-minutes" min="1" max="120" value="15" />
           <span class="auto-end-unit">分鐘</span>
         </div>
       </div>
-      <div class="whitelist-section">
-        <div class="whitelist-header">
-          <span class="whitelist-title">白名單（僅對自動 End Task 生效）</span>
-          <button type="button" id="whitelist-toggle" class="whitelist-toggle" aria-expanded="false">展開</button>
+      <div class="rules-section">
+        <div class="rules-header">
+          <span class="rules-title">自動 End Task 規則</span>
+          <button type="button" id="rules-toggle" class="rules-toggle" aria-expanded="false">展開</button>
         </div>
-        <div id="whitelist-content" class="whitelist-content hidden">
-          <p class="whitelist-hint">可輸入 domain（如 example.com）、FQDN（如 mail.example.com）或完整 URL（如 https://example.com/page）</p>
-          <div class="whitelist-add-row">
-            <textarea id="whitelist-input" class="whitelist-input" placeholder="一行一個，支援換行輸入多個" rows="3"></textarea>
-            <button type="button" id="whitelist-add" class="whitelist-add-btn">新增</button>
+        <div id="rules-content" class="rules-content hidden">
+          <p class="rules-hint">站點規則只影響自動 End Task；單一分頁請直接在分頁列點選 Never Close。</p>
+          <div class="rule-form-row">
+            <select id="rule-match-type" class="rule-select">
+              <option value="domain">Domain</option>
+              <option value="fqdn">FQDN</option>
+              <option value="url">URL</option>
+            </select>
+            <input id="rule-pattern" class="rule-input" type="text" placeholder="example.com / mail.example.com / https://example.com/page" />
           </div>
-          <ul id="whitelist-list" class="whitelist-list"></ul>
+          <div class="rule-form-row">
+            <select id="rule-mode" class="rule-select">
+              <option value="never">Never Close</option>
+              <option value="idle">Auto End After</option>
+            </select>
+            <div id="rule-idle-group" class="rule-idle-group hidden">
+              <input type="number" id="rule-idle-minutes" min="1" max="120" value="15" />
+              <span class="rule-idle-unit">分鐘</span>
+            </div>
+            <button type="button" id="rule-add" class="rule-add-btn">儲存規則</button>
+          </div>
+          <ul id="rule-list" class="rule-list"></ul>
         </div>
       </div>
     </header>
@@ -68,6 +83,7 @@
       <button id="open-shortcut-settings" class="settings-btn">設定快捷鍵</button>
     </footer>
   </div>
+  <script src="auto-end-rules.js"></script>
   <script src="prefix-tab-title.js"></script>
   <script src="popup.js"></script>
 </body>

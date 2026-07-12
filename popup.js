@@ -621,6 +621,17 @@ function setupRulesUI() {
   ruleAddBtn?.addEventListener('click', upsertAutoEndRule);
 }
 
+function showExtensionVersion() {
+  const versionEl = document.getElementById('extension-version');
+  if (!versionEl) return;
+  try {
+    const version = chrome.runtime.getManifest()?.version;
+    versionEl.textContent = version ? `v${version}` : '';
+  } catch {
+    versionEl.textContent = '';
+  }
+}
+
 function scheduleDeferredInit(autoEndTask) {
   const run = () => {
     loadShortcutInfo();
@@ -712,6 +723,8 @@ function handleTabListClick(e) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  showExtensionVersion();
+
   AutoEndRules.ensureAutoEndRulesMigrated()
     .then(() => Promise.all([loadTabs(), loadAutoEndRules()]))
     .catch((err) => {

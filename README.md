@@ -10,8 +10,11 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 - **Restore**：恢復已終止的分頁（會重新載入該頁面）
 - **End Task All**：一次終止目前視窗中所有可操作分頁（包含作用中分頁）
 - **Restore All**：一次恢復目前視窗中所有已終止的分頁
+- **快捷鍵**終止當前分頁後，狀態會與 popup 同步（可 Restore）
 
-終止 **http / https** 分頁前，擴充功能會嘗試在該頁的 `document.title` 前加上 ♻️，方便在分頁列辨識已 End Task 的分頁；**Restore** 重新載入後標題會恢復為網站標題。若瀏覽器目前未授予該站點存取權限，或該頁屬於 Chromium 保護頁面（如 Chrome Web Store / Edge Add-ons），則會跳過前綴注入，但仍照常終止 process。
+終止 **http / https** 分頁前（手動／快捷鍵），擴充功能會嘗試在該頁的 `document.title` 前加上 ♻️，方便在分頁列辨識已 End Task 的分頁；**Restore** 重新載入後標題會恢復為網站標題。若瀏覽器目前未授予該站點存取權限，或該頁屬於 Chromium 保護頁面（如 Chrome Web Store / Edge Add-ons），則會跳過前綴注入，但仍照常終止 process。自動 End Task 為減少延遲與喚醒閒置頁，**不會**注入 ♻️ 前綴。
+
+**共用 process：** Chromium 可能讓多個分頁共用同一個 renderer process。End Task 是 process 級操作（與 Task Manager 相同），因此終止一個分頁時，同 process 的其他分頁也會一併結束，並在列表中一併標記為已終止。
 
 ### 自動 End Task
 
@@ -20,7 +23,7 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 - 可為不同的 `domain`、`FQDN` 或 `URL` 設定不同規則
 - 站點規則可設定為 **Never Close** 或指定分鐘數後自動 End Task
 - 可直接在 popup 的分頁列將單一 tab 設為 **Never Close**
-- 每分鐘檢查一次
+- 啟用時每分鐘檢查一次；關閉自動 End Task 後會停止定時 alarm，避免無謂喚醒
 - `Never Close` 規則只影響自動 End Task；手動 `End Task` / `End Task All` 仍可強制關閉
 
 ### 快捷鍵
@@ -73,6 +76,7 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 ```
 ├── manifest.json       # 擴充功能設定
 ├── auto-end-rules.js   # 自動 End Task 規則、遷移與共享 storage helper
+├── end-task-core.js    # 共用 terminate／批次／死分頁校正邏輯
 ├── popup.html          # popup 介面
 ├── popup.js            # popup 邏輯
 ├── popup.css           # popup 樣式

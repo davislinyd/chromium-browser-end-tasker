@@ -33,28 +33,75 @@
     };
   }
 
+  /** Serializes async work in one JS context to avoid read-modify-write races. */
+  function createMutex() {
+    let chain = Promise.resolve();
+    return function runExclusive(fn) {
+      const run = chain.then(() => fn());
+      chain = run.then(
+        () => undefined,
+        () => undefined
+      );
+      return run;
+    };
+  }
+
   function createObjectStorage(area, key) {
     const targetArea = area || createFallbackArea();
+    const runExclusive = createMutex();
+
+    async function readAllUnlocked() {
+      const result = await targetArea.get(key);
+      const value = result?.[key];
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    }
+
+    async function writeAllUnlocked(data) {
+      const nextData =
+        data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+      await targetArea.set({ [key]: nextData });
+    }
+
     return {
-      async getAll() {
-        const result = await targetArea.get(key);
-        const value = result?.[key];
-        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      getAll() {
+        return runExclusive(() => readAllUnlocked());
       },
-      async setAll(data) {
-        const nextData =
-          data && typeof data === 'object' && !Array.isArray(data) ? data : {};
-        await targetArea.set({ [key]: nextData });
+      setAll(data) {
+        return runExclusive(() => writeAllUnlocked(data));
       },
-      async setEntry(id, value) {
-        const current = await this.getAll();
-        current[String(id)] = value;
-        await this.setAll(current);
+      setEntry(id, value) {
+        return runExclusive(async () => {
+          const current = await readAllUnlocked();
+          current[String(id)] = value;
+          await writeAllUnlocked(current);
+        });
       },
-      async removeEntry(id) {
-        const current = await this.getAll();
-        delete current[String(id)];
-        await this.setAll(current);
+      setEntries(entries) {
+        return runExclusive(async () => {
+          const current = await readAllUnlocked();
+          if (entries && typeof entries === 'object') {
+            for (const [id, value] of Object.entries(entries)) {
+              current[String(id)] = value;
+            }
+          }
+          await writeAllUnlocked(current);
+        });
+      },
+      removeEntry(id) {
+        return runExclusive(async () => {
+          const current = await readAllUnlocked();
+          delete current[String(id)];
+          await writeAllUnlocked(current);
+        });
+      },
+      removeEntries(ids) {
+        return runExclusive(async () => {
+          const current = await readAllUnlocked();
+          for (const id of ids || []) {
+            delete current[String(id)];
+          }
+          await writeAllUnlocked(current);
+        });
       },
     };
   }

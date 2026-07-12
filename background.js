@@ -1,18 +1,19 @@
-importScripts('auto-end-rules.js', 'prefix-tab-title.js');
+importScripts('auto-end-rules.js', 'prefix-tab-title.js', 'end-task-core.js');
 
 const terminatedStorage = AutoEndRules.getTerminatedTabsStorage();
 const protectedTabStorage = AutoEndRules.getProtectedTabsStorage();
+const AUTO_END_ALARM = 'auto-end-task';
 
-function isBuiltInPage(url) {
-  return (
-    url?.startsWith('chrome://') ||
-    url?.startsWith('brave://') ||
-    url?.startsWith('edge://')
-  );
-}
+/** In-memory cache of auto-end rules; refreshed on storage changes / startup. */
+let cachedAutoEndRules = null;
 
 function canAutoTerminateTab(tab) {
-  return tab.id && !tab.active && tab.lastAccessed != null && !isBuiltInPage(tab.url);
+  return (
+    tab.id &&
+    !tab.active &&
+    tab.lastAccessed != null &&
+    !EndTaskCore.isBuiltInPage(tab.url)
+  );
 }
 
 async function cleanupStaleProtectedTabs(tabs) {
@@ -34,22 +35,50 @@ async function cleanupStaleProtectedTabs(tabs) {
   return protectedTabs;
 }
 
+async function loadRulesIntoCache() {
+  cachedAutoEndRules = await AutoEndRules.ensureAutoEndRulesMigrated();
+  return cachedAutoEndRules;
+}
+
+async function getCachedRules() {
+  if (cachedAutoEndRules) return cachedAutoEndRules;
+  return loadRulesIntoCache();
+}
+
 async function ensureAlarm() {
-  const alarm = await chrome.alarms.get('auto-end-task');
+  const alarm = await chrome.alarms.get(AUTO_END_ALARM);
   if (!alarm) {
-    await chrome.alarms.create('auto-end-task', { periodInMinutes: 1 });
+    await chrome.alarms.create(AUTO_END_ALARM, { periodInMinutes: 1 });
   }
+}
+
+async function clearAlarm() {
+  await chrome.alarms.clear(AUTO_END_ALARM);
+}
+
+async function syncAlarmWithSettings() {
+  const { autoEndTask } = await chrome.storage.local.get('autoEndTask');
+  const enabled = !!autoEndTask?.enabled;
+  if (enabled) {
+    await ensureAlarm();
+  } else {
+    await clearAlarm();
+  }
+  return enabled;
 }
 
 async function runAutoEndTask() {
   if (!chrome.processes) return;
 
-  const rules = await AutoEndRules.ensureAutoEndRulesMigrated();
   const { autoEndTask } = await chrome.storage.local.get('autoEndTask');
   const { enabled = false, idleMinutes = AutoEndRules.DEFAULT_IDLE_MINUTES } =
     autoEndTask || {};
-  if (!enabled) return;
+  if (!enabled) {
+    await clearAlarm();
+    return;
+  }
 
+  const rules = await getCachedRules();
   const now = Date.now();
   const terminatedTabs = await terminatedStorage.getAll();
   const tabs = await chrome.tabs.query({});
@@ -73,26 +102,17 @@ async function runAutoEndTask() {
     toTerminate.push(tab);
   }
 
-  for (const tab of toTerminate) {
-    try {
-      await prefixTabTitleWithMarker(tab.id, tab.url);
-      const processId = await chrome.processes.getProcessIdForTab(tab.id);
-      await chrome.processes.terminate(processId);
-      await terminatedStorage.setEntry(tab.id, {
-        url: tab.url,
-        title: tab.title,
-      });
-    } catch (err) {
-      const isProcessNotFound = err?.message?.includes('Process not found');
-      if (isProcessNotFound) {
-        await terminatedStorage.setEntry(tab.id, {
-          url: tab.url,
-          title: tab.title,
-        });
-      } else {
-        console.error('Auto end task failed:', err);
-      }
-    }
+  if (toTerminate.length === 0) return;
+
+  try {
+    await EndTaskCore.terminateTabsBatch(toTerminate, {
+      prefixTitle: false,
+      concurrency: EndTaskCore.DEFAULT_CONCURRENCY,
+      allTabs: tabs,
+      terminatedStorage,
+    });
+  } catch (err) {
+    console.error('Auto end task batch failed:', err);
   }
 }
 
@@ -104,18 +124,46 @@ if (!AutoEndRules.hasSessionStorageSupport()) {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   protectedTabStorage.removeEntry(tabId).catch(() => {});
+  terminatedStorage.removeEntry(tabId).catch(() => {});
 });
 
-AutoEndRules.ensureAutoEndRulesMigrated().catch((err) => {
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') return;
+
+  if (changes[AutoEndRules.AUTO_END_RULES_KEY]) {
+    const next = changes[AutoEndRules.AUTO_END_RULES_KEY].newValue;
+    cachedAutoEndRules = AutoEndRules.normalizeRules(next);
+  }
+
+  if (changes.autoEndTask) {
+    const enabled = !!changes.autoEndTask.newValue?.enabled;
+    if (enabled) {
+      ensureAlarm().catch((err) => console.error('Failed to ensure alarm:', err));
+    } else {
+      clearAlarm().catch((err) => console.error('Failed to clear alarm:', err));
+    }
+  }
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  loadRulesIntoCache().catch((err) => {
+    console.error('Failed to initialize auto end rules:', err);
+  });
+  syncAlarmWithSettings().catch((err) => {
+    console.error('Failed to sync auto end alarm:', err);
+  });
+});
+
+loadRulesIntoCache().catch((err) => {
   console.error('Failed to initialize auto end rules:', err);
 });
 
-ensureAlarm().catch((err) => {
-  console.error('Failed to ensure auto end alarm:', err);
+syncAlarmWithSettings().catch((err) => {
+  console.error('Failed to sync auto end alarm:', err);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'auto-end-task') {
+  if (alarm.name === AUTO_END_ALARM) {
     runAutoEndTask().catch((err) => {
       console.error('Auto end task run failed:', err);
     });
@@ -123,26 +171,28 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.commands.onCommand.addListener(async (command) => {
-  if (command === 'end-current-tab') {
-    if (!chrome.processes) {
-      console.error('chrome.processes API is not available');
+  if (command !== 'end-current-tab') return;
+
+  if (!chrome.processes) {
+    console.error('chrome.processes API is not available');
+    return;
+  }
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) return;
+
+    if (EndTaskCore.isBuiltInPage(tab.url)) {
+      console.warn('Cannot terminate built-in pages');
       return;
     }
 
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab) return;
-
-      if (isBuiltInPage(tab.url)) {
-        console.warn('Cannot terminate built-in pages');
-        return;
-      }
-
-      await prefixTabTitleWithMarker(tab.id, tab.url);
-      const processId = await chrome.processes.getProcessIdForTab(tab.id);
-      await chrome.processes.terminate(processId);
-    } catch (err) {
-      console.error('Failed to terminate process:', err);
-    }
+    await EndTaskCore.terminateTabProcess(tab, {
+      prefixTitle: true,
+      maybeHasActiveTabAccess: true,
+      terminatedStorage,
+    });
+  } catch (err) {
+    console.error('Failed to terminate process:', err);
   }
 });

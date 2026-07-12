@@ -12,7 +12,9 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 - **Restore All**：一次恢復目前視窗中所有已終止的分頁
 - **快捷鍵**終止當前分頁後，狀態會與 popup 同步（可 Restore）
 
-終止 **http / https** 分頁前（手動／快捷鍵），擴充功能會嘗試在該頁的 `document.title` 前加上 ♻️，方便在分頁列辨識已 End Task 的分頁；**Restore** 重新載入後標題會恢復為網站標題。若瀏覽器目前未授予該站點存取權限，或該頁屬於 Chromium 保護頁面（如 Chrome Web Store / Edge Add-ons），則會跳過前綴注入，但仍照常終止 process。自動 End Task 為減少延遲與喚醒閒置頁，**不會**注入 ♻️ 前綴。
+終止 **http / https / file（本地 HTML）** 分頁前（手動／快捷鍵），擴充功能會嘗試在該頁的 `document.title` 前加上 ♻️，方便在分頁列辨識已 End Task 的分頁；**Restore** 重新載入後標題會恢復。若瀏覽器目前未授予該站點存取權限、該頁屬於 Chromium 保護頁面（如 Chrome Web Store / Edge Add-ons），則會跳過前綴注入，但仍照常終止 process。
+
+**本地 `file://` 檔案：** 需在 `chrome://extensions`（或 `edge://extensions`）→ 本擴充功能「詳細資料」中開啟 **「允許存取檔案網址」／Allow access to file URLs**，非作用中分頁才能穩定注入標題前綴；對目前作用中分頁，透過點擊工具列圖示開啟 popup 時，`activeTab` 通常已足夠。自動 End Task 為減少延遲與喚醒閒置頁，**不會**注入 ♻️ 前綴。
 
 **共用 process：** Chromium 可能讓多個分頁共用同一個 renderer process。End Task 是 process 級操作（與 Task Manager 相同），因此終止一個分頁時，同 process 的其他分頁也會一併結束，並在列表中一併標記為已終止。
 
@@ -62,7 +64,7 @@ Chromium 系瀏覽器專用。一鍵終止分頁 process，釋放記憶體與 CP
 - **Chromium（開發版）**：若含 `chrome.processes` API 則支援
 - **Chrome 穩定版 / Brave**：`chrome.processes` API 不支援，會顯示錯誤訊息，無法使用
 
-本擴充功能另需 **`scripting`**、**`activeTab`** 與 **`http://*/*`、`https://*/*` 主機權限**，才能在終止前修改分頁標題（僅於執行 End Task 時注入，不讀取網頁內容）。舊版白名單會在首次載入新版時自動遷移成站點規則。
+本擴充功能另需 **`scripting`**、**`activeTab`** 與 **`http://*/*`、`https://*/*`、`file:///*` 主機權限**，才能在終止前修改分頁標題（僅於執行 End Task 時注入，不讀取網頁內容）。本機檔案另需使用者開啟「允許存取檔案網址」。舊版白名單會在首次載入新版時自動遷移成站點規則。
 
 ## 自訂快捷鍵
 

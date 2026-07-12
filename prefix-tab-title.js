@@ -1,4 +1,5 @@
 const TITLE_PREFIX_MARK = '\u267B\uFE0F ';
+const FILE_ORIGIN_PATTERN = 'file:///*';
 const RESTRICTED_HOST_RULES = [
   { host: 'chromewebstore.google.com' },
   { host: 'chrome.google.com', pathPrefix: '/webstore' },
@@ -8,6 +9,9 @@ const RESTRICTED_HOST_RULES = [
 function getScriptableOriginPattern(url) {
   try {
     const parsedUrl = new URL(url);
+    if (parsedUrl.protocol === 'file:') {
+      return FILE_ORIGIN_PATTERN;
+    }
     if (!['http:', 'https:'].includes(parsedUrl.protocol)) return null;
     if (isRestrictedScriptingPage(parsedUrl)) return null;
     return `${parsedUrl.protocol}//${parsedUrl.host}/*`;
@@ -24,6 +28,10 @@ function isRestrictedScriptingPage(parsedUrl) {
   );
 }
 
+function isFileUrl(url) {
+  return typeof url === 'string' && url.startsWith('file:');
+}
+
 async function hasHostAccess(originPattern) {
   if (!originPattern || !chrome.permissions?.contains) return true;
 
@@ -34,17 +42,43 @@ async function hasHostAccess(originPattern) {
   }
 }
 
+/**
+ * Chromium 對 file:// 另有「允許存取檔案網址」開關；有 API 時優先查詢。
+ */
+async function isFileSchemeAccessAllowed() {
+  if (!chrome.extension?.isAllowedFileSchemeAccess) return false;
+  try {
+    return await chrome.extension.isAllowedFileSchemeAccess();
+  } catch {
+    return false;
+  }
+}
+
+async function canScriptTab(originPattern, resolvedUrl, maybeHasActiveTabAccess) {
+  if (maybeHasActiveTabAccess) return true;
+
+  if (isFileUrl(resolvedUrl)) {
+    if (await isFileSchemeAccessAllowed()) return true;
+    // 部分環境仍可能以 host permission 表示 file 存取。
+    return hasHostAccess(originPattern);
+  }
+
+  return hasHostAccess(originPattern);
+}
+
 function isExpectedAccessError(err) {
   const message = String(err?.message || '');
   return (
     message.includes('Cannot access contents of the page') ||
     message.includes('Missing host permission for the tab') ||
-    message.includes('The extensions gallery cannot be scripted')
+    message.includes('The extensions gallery cannot be scripted') ||
+    message.includes('Cannot access contents of url "file:') ||
+    message.includes('Extension manifest must request permission to access this host')
   );
 }
 
 /**
- * 在終止 process 前於分頁將 document.title 加上 ♻️ 前綴（僅 http/https）。
+ * 在終止 process 前於分頁將 document.title 加上 ♻️ 前綴（http/https/file）。
  * 注入失敗不拋錯，不阻擋後續 terminate。
  * @param {number} tabId
  * @param {string|undefined} [url] 若已持有 tab.url 可傳入以避免多一次 tabs.get
@@ -67,8 +101,12 @@ async function prefixTabTitleWithMarker(tabId, url, options = {}) {
   const originPattern = resolvedUrl ? getScriptableOriginPattern(resolvedUrl) : null;
   if (!originPattern) return;
 
-  const canUseHostPermission = await hasHostAccess(originPattern);
-  if (!canUseHostPermission && !maybeHasActiveTabAccess) return;
+  const allowed = await canScriptTab(
+    originPattern,
+    resolvedUrl,
+    maybeHasActiveTabAccess
+  );
+  if (!allowed) return;
 
   try {
     await chrome.scripting.executeScript({
@@ -76,7 +114,9 @@ async function prefixTabTitleWithMarker(tabId, url, options = {}) {
       func: (prefix) => {
         const t = document.title || '';
         if (t.startsWith(prefix)) return;
-        document.title = prefix + t;
+        // file:// 常無 <title>，document.title 可能是檔名或空字串。
+        const base = t || 'file';
+        document.title = prefix + base;
       },
       args: [TITLE_PREFIX_MARK],
     });

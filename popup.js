@@ -58,18 +58,29 @@ function createTabItem(tab, options = {}) {
   const {
     isTerminated = false,
     storedInfo = null,
-    isProtected = false,
+    tabPolicy = null,
   } = options;
+
+  const policy = AutoEndRules.normalizeTabPolicy(tabPolicy);
+  const isNeverClose = policy?.mode === AutoEndRules.RULE_MODE_NEVER;
+  const isCustomIdle = policy?.mode === AutoEndRules.RULE_MODE_IDLE;
 
   const item = document.createElement('div');
   item.className = 'tab-item';
-  if (isProtected && !isTerminated) {
+  if (isNeverClose && !isTerminated) {
     item.classList.add('tab-item-protected');
+  } else if (isCustomIdle && !isTerminated) {
+    item.classList.add('tab-item-custom-idle');
   }
   item.dataset.tabId = String(tab.id);
 
   const displayUrl = storedInfo?.url ?? tab.url ?? '';
-  const displayTitle = storedInfo?.title ?? tab.title ?? '(無標題)';
+  // Live tabs must not show ♻️: chrome.tabs.title can lag after End Task / revive
+  // while the browser tab strip already shows a clean title.
+  let displayTitle = storedInfo?.title ?? tab.title ?? '(無標題)';
+  if (!isTerminated && typeof stripTitlePrefixMark === 'function') {
+    displayTitle = stripTitlePrefixMark(displayTitle) || '(無標題)';
+  }
 
   const favicon = document.createElement('img');
   favicon.className = 'tab-favicon';
@@ -94,10 +105,12 @@ function createTabItem(tab, options = {}) {
   title.textContent = displayTitle;
   titleRow.appendChild(title);
 
-  if (isProtected && !isTerminated) {
+  if (policy && !isTerminated) {
     const badge = document.createElement('span');
-    badge.className = 'tab-status-badge';
-    badge.textContent = 'Never Close';
+    badge.className = isNeverClose
+      ? 'tab-status-badge tab-status-badge-never'
+      : 'tab-status-badge tab-status-badge-idle';
+    badge.textContent = AutoEndRules.getTabPolicyLabel(policy);
     titleRow.appendChild(badge);
   }
 
@@ -112,12 +125,49 @@ function createTabItem(tab, options = {}) {
   actions.className = 'tab-actions';
 
   if (!isTerminated) {
-    const protectBtn = document.createElement('button');
-    protectBtn.type = 'button';
-    protectBtn.className = 'protect-toggle-btn';
-    protectBtn.dataset.action = isProtected ? 'allow-auto-end' : 'never-close';
-    protectBtn.textContent = isProtected ? 'Allow Auto End' : 'Never Close';
-    actions.appendChild(protectBtn);
+    const policyControls = document.createElement('div');
+    policyControls.className = 'tab-policy-controls';
+
+    const policySelect = document.createElement('select');
+    policySelect.className = 'tab-policy-select';
+    policySelect.dataset.role = 'tab-policy-mode';
+    policySelect.setAttribute('aria-label', '自動 End Task 分頁政策');
+
+    const optionDefault = document.createElement('option');
+    optionDefault.value = 'default';
+    optionDefault.textContent = '預設';
+    const optionNever = document.createElement('option');
+    optionNever.value = AutoEndRules.RULE_MODE_NEVER;
+    optionNever.textContent = 'Never Close';
+    const optionIdle = document.createElement('option');
+    optionIdle.value = AutoEndRules.RULE_MODE_IDLE;
+    optionIdle.textContent = '自訂閒置';
+
+    policySelect.appendChild(optionDefault);
+    policySelect.appendChild(optionNever);
+    policySelect.appendChild(optionIdle);
+    policySelect.value = policy?.mode || 'default';
+
+    const idleInput = document.createElement('input');
+    idleInput.type = 'number';
+    idleInput.className = 'tab-idle-minutes';
+    idleInput.dataset.role = 'tab-policy-idle';
+    idleInput.min = '1';
+    idleInput.max = '120';
+    idleInput.value = String(
+      isCustomIdle
+        ? policy.idleMinutes
+        : AutoEndRules.DEFAULT_IDLE_MINUTES
+    );
+    idleInput.setAttribute('aria-label', '自訂閒置分鐘');
+    idleInput.title = '分鐘';
+    if (!isCustomIdle) {
+      idleInput.classList.add('hidden');
+    }
+
+    policyControls.appendChild(policySelect);
+    policyControls.appendChild(idleInput);
+    actions.appendChild(policyControls);
   }
 
   const primaryBtn = document.createElement('button');
@@ -141,8 +191,9 @@ function replaceTabItem(itemEl, tab, options) {
   return nextItem;
 }
 
-function markItemsTerminated(tabIds, storedEntries, protectedTabs) {
+function markItemsTerminated(tabIds, storedEntries, tabPolicies) {
   const idSet = new Set((tabIds || []).map(String));
+  const policies = AutoEndRules.normalizeTabPolicies(tabPolicies);
   for (const item of tabList.querySelectorAll('.tab-item')) {
     const tabId = item.dataset.tabId;
     if (!idSet.has(tabId)) continue;
@@ -158,7 +209,7 @@ function markItemsTerminated(tabIds, storedEntries, protectedTabs) {
     replaceTabItem(item, tab, {
       isTerminated: true,
       storedInfo,
-      isProtected: !!protectedTabs?.[tabId],
+      tabPolicy: policies[tabId] || null,
     });
   }
 }
@@ -171,16 +222,26 @@ async function restoreTab(tabId, itemEl) {
   btn.textContent = '恢復中...';
 
   try {
-    await chrome.tabs.reload(tabId);
+    const terminatedMap = await terminatedStorage.getAll();
+    await reloadTerminatedTab(tabId, terminatedMap[String(tabId)]);
     await terminatedStorage.removeEntry(tabId);
     const tab = await chrome.tabs.get(tabId);
-    const protectedTabs = await protectedTabStorage.getAll();
-    replaceTabItem(itemEl, tab, {
-      isProtected: !!protectedTabs[String(tabId)],
+    const tabPolicies = AutoEndRules.normalizeTabPolicies(
+      await protectedTabStorage.getAll()
+    );
+    const row =
+      tabList.querySelector(`.tab-item[data-tab-id="${tabId}"]`) || itemEl;
+    replaceTabItem(row, tab, {
+      tabPolicy: tabPolicies[String(tabId)] || null,
     });
   } catch (err) {
-    btn.disabled = false;
-    btn.textContent = 'Restore';
+    const row =
+      tabList.querySelector(`.tab-item[data-tab-id="${tabId}"]`) || itemEl;
+    const liveBtn = row.querySelector('.restore-btn');
+    if (liveBtn) {
+      liveBtn.disabled = false;
+      liveBtn.textContent = 'Restore';
+    }
     alert(`恢復失敗：${err.message}`);
   }
 }
@@ -198,10 +259,11 @@ async function endTask(tabId, itemEl, tab) {
   btn.textContent = '終止中...';
 
   try {
-    const [protectedTabs, allTabs] = await Promise.all([
+    const [tabPoliciesRaw, allTabs] = await Promise.all([
       protectedTabStorage.getAll(),
       chrome.tabs.query({}),
     ]);
+    const tabPolicies = AutoEndRules.normalizeTabPolicies(tabPoliciesRaw);
 
     const result = await EndTaskCore.terminateTabProcess(tab, {
       prefixTitle: true,
@@ -210,22 +272,61 @@ async function endTask(tabId, itemEl, tab) {
       terminatedStorage,
     });
 
-    markItemsTerminated(result.terminatedTabIds, result.storedEntries, protectedTabs);
-  } catch (err) {
-    if (EndTaskCore.isProcessNotFoundError(err)) {
-      const protectedTabs = await protectedTabStorage.getAll();
-      const storedInfo = EndTaskCore.storedInfoFromTab(tab);
-      await terminatedStorage.setEntry(tabId, storedInfo);
-      replaceTabItem(itemEl, tab, {
+    const terminatedIds = result.terminatedTabIds || [];
+    const idKey = String(tabId);
+
+    if (terminatedIds.length > 0) {
+      markItemsTerminated(terminatedIds, result.storedEntries, tabPolicies);
+    }
+
+    // Always sync the clicked row: markItemsTerminated may miss a stale node, and
+    // primary is always written to storage on successful terminate.
+    const storedFromResult = result.storedEntries?.[idKey];
+    const storedFromDb = (await terminatedStorage.getAll())[idKey];
+    const storedInfo =
+      storedFromResult || storedFromDb || EndTaskCore.storedInfoFromTab(tab);
+
+    if (storedFromResult || storedFromDb || terminatedIds.map(String).includes(idKey)) {
+      const row =
+        tabList.querySelector(`.tab-item[data-tab-id="${idKey}"]`) || itemEl;
+      replaceTabItem(row, tab, {
         isTerminated: true,
         storedInfo,
-        isProtected: !!protectedTabs[String(tabId)],
+        tabPolicy: tabPolicies[idKey] || null,
+      });
+    } else {
+      // Terminate reported no durable kill — restore End Task control.
+      const liveTab = await chrome.tabs.get(tabId).catch(() => tab);
+      const row =
+        tabList.querySelector(`.tab-item[data-tab-id="${idKey}"]`) || itemEl;
+      replaceTabItem(row, liveTab, {
+        tabPolicy: tabPolicies[idKey] || null,
+      });
+    }
+  } catch (err) {
+    if (EndTaskCore.isProcessNotFoundError(err)) {
+      const policies = AutoEndRules.normalizeTabPolicies(
+        await protectedTabStorage.getAll()
+      );
+      const storedInfo = EndTaskCore.storedInfoFromTab(tab);
+      await terminatedStorage.setEntry(tabId, storedInfo);
+      const row =
+        tabList.querySelector(`.tab-item[data-tab-id="${tabId}"]`) || itemEl;
+      replaceTabItem(row, tab, {
+        isTerminated: true,
+        storedInfo,
+        tabPolicy: policies[String(tabId)] || null,
       });
       return;
     }
 
-    btn.disabled = false;
-    btn.textContent = 'End Task';
+    const row =
+      tabList.querySelector(`.tab-item[data-tab-id="${tabId}"]`) || itemEl;
+    const liveBtn = row.querySelector('.end-task-btn');
+    if (liveBtn) {
+      liveBtn.disabled = false;
+      liveBtn.textContent = 'End Task';
+    }
     if (err?.code === 'TERMINATE_FAILED' || err?.code === 'BUILT_IN_PAGE') {
       alert('無法終止此 process，可能是內建頁面或受保護的分頁。');
     } else {
@@ -234,27 +335,84 @@ async function endTask(tabId, itemEl, tab) {
   }
 }
 
-async function setTabProtection(tabId, itemEl, shouldProtect) {
-  const btn = itemEl.querySelector('.protect-toggle-btn');
-  if (!btn) return;
-
-  btn.disabled = true;
-  btn.textContent = shouldProtect ? '設定中...' : '更新中...';
+async function setTabPolicy(tabId, itemEl, policy) {
+  const select = itemEl.querySelector('[data-role="tab-policy-mode"]');
+  const idleInput = itemEl.querySelector('[data-role="tab-policy-idle"]');
+  if (select) select.disabled = true;
+  if (idleInput) idleInput.disabled = true;
 
   try {
-    if (shouldProtect) {
-      await protectedTabStorage.setEntry(tabId, true);
+    const normalized = AutoEndRules.normalizeTabPolicy(policy);
+    if (normalized) {
+      await protectedTabStorage.setEntry(tabId, normalized);
     } else {
       await protectedTabStorage.removeEntry(tabId);
     }
 
     const tab = await chrome.tabs.get(tabId);
-    replaceTabItem(itemEl, tab, { isProtected: shouldProtect });
+    replaceTabItem(itemEl, tab, { tabPolicy: normalized });
   } catch (err) {
-    btn.disabled = false;
-    btn.textContent = shouldProtect ? 'Never Close' : 'Allow Auto End';
-    alert(`更新保護狀態失敗：${err.message}`);
+    if (select) select.disabled = false;
+    if (idleInput) idleInput.disabled = false;
+    alert(`更新分頁政策失敗：${err.message}`);
   }
+}
+
+function readTabPolicyFromItem(itemEl) {
+  const select = itemEl.querySelector('[data-role="tab-policy-mode"]');
+  const idleInput = itemEl.querySelector('[data-role="tab-policy-idle"]');
+  if (!select) return null;
+
+  const mode = select.value;
+  if (mode === AutoEndRules.RULE_MODE_NEVER) {
+    return { mode: AutoEndRules.RULE_MODE_NEVER };
+  }
+  if (mode === AutoEndRules.RULE_MODE_IDLE) {
+    return {
+      mode: AutoEndRules.RULE_MODE_IDLE,
+      idleMinutes: AutoEndRules.clampIdleMinutes(
+        idleInput?.value ?? AutoEndRules.DEFAULT_IDLE_MINUTES
+      ),
+    };
+  }
+  return null;
+}
+
+/**
+ * Tabs protected from End Task All (tab Never Close or matching site never rule).
+ * Single-tab End Task still force-kills.
+ */
+async function filterTabsForEndTaskAll(tabs) {
+  const [tabPoliciesRaw, rules, { autoEndTask }] = await Promise.all([
+    protectedTabStorage.getAll(),
+    AutoEndRules.ensureAutoEndRulesMigrated(),
+    chrome.storage.local.get('autoEndTask'),
+  ]);
+  const tabPolicies = AutoEndRules.normalizeTabPolicies(tabPoliciesRaw);
+  const defaultIdle =
+    autoEndTask?.idleMinutes ?? AutoEndRules.DEFAULT_IDLE_MINUTES;
+  const allowed = [];
+  const skipped = [];
+
+  for (const tab of tabs || []) {
+    const policy = AutoEndRules.resolveAutoEndPolicy(
+      tab,
+      rules,
+      defaultIdle,
+      tabPolicies
+    );
+    if (policy?.mode === AutoEndRules.RULE_MODE_NEVER) {
+      skipped.push({
+        id: tab.id,
+        source: policy.source,
+        title: tab.title,
+      });
+      continue;
+    }
+    allowed.push(tab);
+  }
+
+  return { allowed, skipped, tabPolicies };
 }
 
 async function endTaskAll() {
@@ -267,6 +425,7 @@ async function endTaskAll() {
 
   endTaskAllBtn.disabled = true;
   endTaskAllBtn.textContent = '終止中...';
+  DebugLog?.info('endTaskAll start', { uiCount: items.length });
 
   try {
     const tabIds = items.map((item) => parseInt(item.dataset.tabId, 10));
@@ -282,22 +441,72 @@ async function endTaskAll() {
       }
     );
     const validTabs = tabs.filter(Boolean);
-    if (validTabs.length === 0) return;
+    if (validTabs.length === 0) {
+      DebugLog?.warn('endTaskAll no valid tabs');
+      return;
+    }
 
-    const [protectedTabs, allTabs] = await Promise.all([
-      protectedTabStorage.getAll(),
-      chrome.tabs.query({}),
-    ]);
+    const { allowed, skipped } = await filterTabsForEndTaskAll(validTabs);
+    DebugLog?.info('endTaskAll filter', {
+      valid: validTabs.length,
+      allowed: allowed.length,
+      skippedNeverClose: skipped,
+    });
 
-    const result = await EndTaskCore.terminateTabsBatch(validTabs, {
+    if (allowed.length === 0) {
+      alert(
+        skipped.length > 0
+          ? `沒有可終止的分頁（${skipped.length} 個為 Never Close，已略過）。`
+          : '沒有可終止的分頁。'
+      );
+      return;
+    }
+
+    const allTabs = await chrome.tabs.query({});
+
+    const result = await EndTaskCore.terminateTabsBatch(allowed, {
       prefixTitle: true,
       concurrency: EndTaskCore.DEFAULT_CONCURRENCY,
       allTabs,
       terminatedStorage,
     });
 
-    markItemsTerminated(result.terminatedTabIds, result.storedEntries, protectedTabs);
+    const results = result.results || [];
+    const okCount = results.filter((item) => item?.ok).length;
+    const failCount = results.filter((item) => item && !item.ok).length;
+    const terminatedCount = (result.terminatedTabIds || []).length;
+    const storedAfter = await terminatedStorage.getAll();
+    const storedCount = Object.keys(storedAfter || {}).length;
+
+    DebugLog?.info('endTaskAll result', {
+      okCount,
+      failCount,
+      terminatedCount,
+      storedCount,
+      terminatedTabIds: result.terminatedTabIds,
+      errors: results
+        .filter((r) => r?.error)
+        .map((r) => ({
+          tabId: r.tab?.id,
+          message: String(r.error?.message || r.error),
+          code: r.error?.code,
+        })),
+    });
+
+    await loadTabs();
+
+    // Success if any group ok OR any terminated ids written OR storage has entries.
+    const hadSuccess = okCount > 0 || terminatedCount > 0 || storedCount > 0;
+    if (!hadSuccess) {
+      const firstErr = results.find((item) => item?.error)?.error;
+      alert(
+        firstErr
+          ? `批次終止失敗：${firstErr.message || firstErr}`
+          : '未能終止任何分頁。請確認使用 Edge/Chrome Dev，且 chrome.processes 可用。可按「複製 Log」回報。'
+      );
+    }
   } catch (err) {
+    DebugLog?.error('endTaskAll exception', { message: String(err?.message || err) });
     alert(`批次終止失敗：${err.message}`);
   } finally {
     endTaskAllBtn.disabled = false;
@@ -305,52 +514,133 @@ async function endTaskAll() {
   }
 }
 
+/**
+ * Reload a tab that was End Task'd. Prefer reload; fall back to navigating
+ * to the stored URL when the renderer is gone and reload fails (Edge).
+ */
+async function reloadTerminatedTab(tabId, storedInfo) {
+  try {
+    await chrome.tabs.reload(tabId);
+    return true;
+  } catch (err) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const url = storedInfo?.url || tab?.url;
+    if (!url || EndTaskCore.isBuiltInPage(url)) {
+      throw err;
+    }
+    await chrome.tabs.update(tabId, { url });
+    return true;
+  }
+}
+
 async function restoreAll() {
-  const items = [...tabList.querySelectorAll('.tab-item')].filter((item) =>
+  const uiRestoreItems = [...tabList.querySelectorAll('.tab-item')].filter((item) =>
     item.querySelector('.restore-btn')
   );
-  if (items.length === 0) return;
 
-  restoreAllBtn.disabled = true;
-  restoreAllBtn.textContent = '恢復中...';
+  const [terminatedMap, currentTabs] = await Promise.all([
+    terminatedStorage.getAll(),
+    chrome.tabs.query({ currentWindow: true }),
+  ]);
+  const currentIds = new Set(currentTabs.map((tab) => tab.id));
+
+  const idSet = new Set();
+  for (const item of uiRestoreItems) {
+    const id = parseInt(item.dataset.tabId, 10);
+    if (Number.isFinite(id) && currentIds.has(id)) idSet.add(id);
+  }
+  for (const idStr of Object.keys(terminatedMap || {})) {
+    const id = Number(idStr);
+    if (Number.isFinite(id) && currentIds.has(id)) idSet.add(id);
+  }
+
+  // Fallback: process-dead tabs not marked terminated (stale state after false batch UI).
+  if (idSet.size === 0 && chrome.processes) {
+    for (const tab of currentTabs) {
+      if (!tab?.id || EndTaskCore.isBuiltInPage(tab.url)) continue;
+      try {
+        const state = await EndTaskCore.probeTabProcess(tab.id);
+        if (state === EndTaskCore.PROBE_STATE_DEAD) {
+          idSet.add(tab.id);
+          if (!terminatedMap[String(tab.id)]) {
+            terminatedMap[String(tab.id)] = EndTaskCore.storedInfoFromTab(tab);
+          }
+        }
+      } catch {
+        // ignore probe errors
+      }
+    }
+    DebugLog?.info('restoreAll dead-process fallback', { count: idSet.size });
+  }
+
+  const tabIds = [...idSet];
+  DebugLog?.info('restoreAll start', {
+    uiRestore: uiRestoreItems.length,
+    storageKeys: Object.keys(terminatedMap || {}).length,
+    tabIds,
+  });
+
+  if (tabIds.length === 0) {
+    alert('沒有可恢復的分頁（列表中無 Restore，storage 亦無 terminated 記錄）。');
+    return;
+  }
+
+  if (restoreAllBtn) {
+    restoreAllBtn.disabled = true;
+    restoreAllBtn.textContent = '恢復中...';
+  }
+  for (const item of uiRestoreItems) {
+    const btn = item.querySelector('.restore-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '恢復中...';
+    }
+  }
+
+  const succeededIds = [];
+  const failedIds = [];
 
   try {
-    const protectedTabs = await protectedTabStorage.getAll();
-    const succeededIds = [];
-
-    await EndTaskCore.runWithConcurrency(
-      items,
-      EndTaskCore.DEFAULT_CONCURRENCY,
-      async (item) => {
-        const tabId = parseInt(item.dataset.tabId, 10);
-        const btn = item.querySelector('.restore-btn');
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = '恢復中...';
-        }
-        try {
-          await chrome.tabs.reload(tabId);
-          succeededIds.push(tabId);
-          const tab = await chrome.tabs.get(tabId);
-          replaceTabItem(item, tab, {
-            isProtected: !!protectedTabs[String(tabId)],
-          });
-        } catch (err) {
-          if (btn) {
-            btn.disabled = false;
-            btn.textContent = 'Restore';
-          }
-          console.error('Restore failed:', tabId, err);
-        }
+    for (const tabId of tabIds) {
+      try {
+        await reloadTerminatedTab(tabId, terminatedMap[String(tabId)]);
+        await terminatedStorage.removeEntry(tabId);
+        succeededIds.push(tabId);
+        DebugLog?.info('restoreAll tab ok', { tabId });
+      } catch (err) {
+        failedIds.push(tabId);
+        DebugLog?.error('restoreAll tab fail', {
+          tabId,
+          message: String(err?.message || err),
+        });
       }
-    );
+    }
 
-    if (succeededIds.length > 0) {
-      await terminatedStorage.removeEntries(succeededIds);
+    await loadTabs();
+
+    DebugLog?.info('restoreAll done', {
+      succeeded: succeededIds.length,
+      failed: failedIds.length,
+    });
+
+    if (succeededIds.length === 0 && failedIds.length > 0) {
+      alert('Restore All 失敗：無法重新載入分頁。可按「複製 Log」回報。');
+    } else if (failedIds.length > 0) {
+      alert(`部分分頁恢復失敗（${failedIds.length}/${tabIds.length}）。`);
+    }
+  } catch (err) {
+    DebugLog?.error('restoreAll exception', { message: String(err?.message || err) });
+    alert(`Restore All 失敗：${err.message}`);
+    try {
+      await loadTabs();
+    } catch {
+      // ignore
     }
   } finally {
-    restoreAllBtn.disabled = false;
-    restoreAllBtn.textContent = 'Restore All';
+    if (restoreAllBtn) {
+      restoreAllBtn.disabled = false;
+      restoreAllBtn.textContent = 'Restore All';
+    }
   }
 }
 
@@ -378,10 +668,7 @@ async function loadTabs() {
       terminatedDataRaw && typeof terminatedDataRaw === 'object'
         ? terminatedDataRaw
         : {};
-    const protectedTabs =
-      protectedDataRaw && typeof protectedDataRaw === 'object'
-        ? protectedDataRaw
-        : {};
+    const tabPolicies = AutoEndRules.normalizeTabPolicies(protectedDataRaw);
     const tabIds = new Set(tabs.map((tab) => String(tab.id)));
     let validTerminated = Object.fromEntries(
       Object.entries(terminatedTabs).filter(([id]) => tabIds.has(id))
@@ -409,12 +696,20 @@ async function loadTabs() {
       return;
     }
 
-    // Reconcile tabs whose process is already gone but not marked terminated.
+    // Mark tabs whose process is already gone but not in storage.
     validTerminated = await EndTaskCore.reconcileDeadTabs(
       filteredTabs,
       validTerminated,
       terminatedStorage
     );
+    // Do NOT reconcileRevivedTabs here: error-page processes after End Task look
+    // "alive" and would wipe terminated markers, leaving Restore All with nothing.
+
+    DebugLog?.info('loadTabs', {
+      tabCount: filteredTabs.length,
+      terminatedCount: Object.keys(validTerminated).length,
+      terminatedIds: Object.keys(validTerminated),
+    });
 
     filteredTabs.sort((a, b) => (a.active ? 0 : 1) - (b.active ? 0 : 1));
 
@@ -425,7 +720,7 @@ async function loadTabs() {
         createTabItem(tab, {
           isTerminated: !!storedInfo,
           storedInfo,
-          isProtected: !!protectedTabs[String(tab.id)],
+          tabPolicy: tabPolicies[String(tab.id)] || null,
         })
       );
     }
@@ -711,28 +1006,159 @@ function handleTabListClick(e) {
         .then((tab) => endTask(tabId, item, tab))
         .catch(() => {});
       break;
-    case 'never-close':
-      setTabProtection(tabId, item, true);
-      break;
-    case 'allow-auto-end':
-      setTabProtection(tabId, item, false);
-      break;
     default:
       break;
   }
 }
 
+function handleTabListChange(e) {
+  const target = e.target;
+  if (
+    !target?.matches?.('[data-role="tab-policy-mode"], [data-role="tab-policy-idle"]')
+  ) {
+    return;
+  }
+
+  const item = target.closest('.tab-item');
+  if (!item) return;
+
+  const tabId = parseInt(item.dataset.tabId, 10);
+  if (!Number.isFinite(tabId)) return;
+
+  // When switching to custom idle, show input with current/default value before save.
+  if (target.dataset.role === 'tab-policy-mode') {
+    const idleInput = item.querySelector('[data-role="tab-policy-idle"]');
+    if (idleInput) {
+      const showIdle = target.value === AutoEndRules.RULE_MODE_IDLE;
+      idleInput.classList.toggle('hidden', !showIdle);
+      if (showIdle && !idleInput.value) {
+        idleInput.value = String(AutoEndRules.DEFAULT_IDLE_MINUTES);
+      }
+    }
+  }
+
+  const policy = readTabPolicyFromItem(item);
+  setTabPolicy(tabId, item, policy);
+}
+
+async function markItemsRevived(tabIds) {
+  const idList = (tabIds || []).map(String).filter(Boolean);
+  if (idList.length === 0) return;
+
+  const tabPolicies = AutoEndRules.normalizeTabPolicies(
+    await protectedTabStorage.getAll()
+  );
+
+  for (const id of idList) {
+    const item = tabList.querySelector(`.tab-item[data-tab-id="${id}"]`);
+    if (!item?.querySelector('.restore-btn')) continue;
+    try {
+      const tab = await chrome.tabs.get(Number(id));
+      replaceTabItem(item, tab, {
+        tabPolicy: tabPolicies[id] || null,
+      });
+    } catch {
+      // Tab closed; ignore.
+    }
+  }
+}
+
+function setupTerminatedSyncListeners() {
+  // Only react to our own storage removals (Restore); never auto-clear on process alive.
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'session' && areaName !== 'local') return;
+    const change = changes[AutoEndRules.TERMINATED_TABS_KEY];
+    if (!change) return;
+
+    const oldValue =
+      change.oldValue && typeof change.oldValue === 'object' ? change.oldValue : {};
+    const newValue =
+      change.newValue && typeof change.newValue === 'object' ? change.newValue : {};
+    const revivedIds = Object.keys(oldValue).filter((id) => !newValue[id]);
+    if (revivedIds.length > 0) {
+      DebugLog?.info('terminated storage removed', { revivedIds });
+      markItemsRevived(revivedIds).catch(() => {});
+    }
+  });
+}
+
+function setupLogViewer() {
+  const toggleBtn = document.getElementById('log-toggle');
+  const panelEl = document.getElementById('log-panel');
+  const viewerEl = document.getElementById('log-viewer');
+  const countEl = document.getElementById('log-count');
+  const copyBtn = document.getElementById('copy-debug-log');
+  const clearBtn = document.getElementById('clear-debug-log');
+
+  if (!toggleBtn || !panelEl || !viewerEl) return;
+
+  let expanded = false;
+
+  function renderLogLines(lineList) {
+    const list = Array.isArray(lineList) ? lineList : [];
+    if (countEl) countEl.textContent = String(list.length);
+    if (!expanded) return;
+
+    const wasNearBottom =
+      viewerEl.scrollHeight - viewerEl.scrollTop - viewerEl.clientHeight < 40;
+    viewerEl.textContent = list.length > 0 ? list.join('\n') : '';
+    if (wasNearBottom || list.length === 0) {
+      viewerEl.scrollTop = viewerEl.scrollHeight;
+    }
+  }
+
+  toggleBtn.addEventListener('click', () => {
+    expanded = !expanded;
+    panelEl.classList.toggle('hidden', !expanded);
+    toggleBtn.textContent = expanded ? '收合' : '展開';
+    toggleBtn.setAttribute('aria-expanded', String(expanded));
+    if (expanded) {
+      renderLogLines(DebugLog?.getLines?.() || []);
+    }
+  });
+
+  copyBtn?.addEventListener('click', async () => {
+    try {
+      await DebugLog.copy();
+      const prev = copyBtn.textContent;
+      copyBtn.textContent = '已複製';
+      setTimeout(() => {
+        copyBtn.textContent = prev || '複製';
+      }, 1500);
+    } catch (err) {
+      alert(`複製 Log 失敗：${err.message}`);
+    }
+  });
+
+  clearBtn?.addEventListener('click', () => {
+    DebugLog?.clear();
+    if (expanded) renderLogLines([]);
+  });
+
+  DebugLog?.subscribe?.((lineList) => {
+    renderLogLines(lineList);
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   showExtensionVersion();
+  setupLogViewer();
+  DebugLog?.info('popup open', {
+    version: chrome.runtime.getManifest()?.version,
+    hasProcesses: !!chrome.processes,
+  });
 
   AutoEndRules.ensureAutoEndRulesMigrated()
     .then(() => Promise.all([loadTabs(), loadAutoEndRules()]))
     .catch((err) => {
+      DebugLog?.error('init failed', { message: String(err?.message || err) });
       showError(`初始化設定失敗：${err.message}`);
     });
 
   setupRulesUI();
+  setupTerminatedSyncListeners();
   tabList.addEventListener('click', handleTabListClick);
+  tabList.addEventListener('change', handleTabListChange);
   ruleListEl?.addEventListener('click', (e) => {
     const btn = e.target.closest('.rule-remove-btn');
     if (!btn?.dataset.ruleId) return;

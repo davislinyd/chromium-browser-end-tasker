@@ -127,6 +127,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   terminatedStorage.removeEntry(tabId).catch(() => {});
 });
 
+// Note: do NOT auto-clear terminated markers when a process becomes "alive".
+// After End Task, Chromium/Edge often shows an error/crash interstitial that still
+// has a renderer process; clearing on alive/complete wiped storage and broke Restore All.
+// Markers are sticky until explicit Restore / Restore All / tab closed.
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;
 

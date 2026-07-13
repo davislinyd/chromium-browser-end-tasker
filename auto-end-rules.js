@@ -293,9 +293,60 @@
     return null;
   }
 
+  /**
+   * Normalize a per-tab auto-end override.
+   * Legacy: true → never. Structured: { mode: 'never' | 'idle', idleMinutes? }.
+   * @returns {{ mode: 'never' } | { mode: 'idle', idleMinutes: number } | null}
+   */
+  function normalizeTabPolicy(value) {
+    if (value === true) {
+      return { mode: RULE_MODE_NEVER };
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const mode = parseRuleMode(value.mode);
+    if (mode === RULE_MODE_NEVER) {
+      return { mode: RULE_MODE_NEVER };
+    }
+    if (mode === RULE_MODE_IDLE) {
+      return {
+        mode: RULE_MODE_IDLE,
+        idleMinutes: clampIdleMinutes(value.idleMinutes),
+      };
+    }
+    return null;
+  }
+
+  function normalizeTabPolicies(map) {
+    const source =
+      map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+    const result = {};
+    for (const [id, value] of Object.entries(source)) {
+      const policy = normalizeTabPolicy(value);
+      if (policy) result[String(id)] = policy;
+    }
+    return result;
+  }
+
+  function getTabPolicyLabel(policy) {
+    const normalized = normalizeTabPolicy(policy);
+    if (!normalized) return '';
+    if (normalized.mode === RULE_MODE_NEVER) return 'Never Close';
+    return `${normalized.idleMinutes} 分鐘`;
+  }
+
   function resolveAutoEndPolicy(tab, rules, defaultIdleMinutes, protectedTabs) {
-    if (protectedTabs?.[String(tab?.id)]) {
+    const tabPolicy = normalizeTabPolicy(protectedTabs?.[String(tab?.id)]);
+    if (tabPolicy?.mode === RULE_MODE_NEVER) {
       return { mode: RULE_MODE_NEVER, source: 'tab' };
+    }
+    if (tabPolicy?.mode === RULE_MODE_IDLE) {
+      return {
+        mode: RULE_MODE_IDLE,
+        idleMinutes: clampIdleMinutes(tabPolicy.idleMinutes),
+        source: 'tab',
+      };
     }
 
     const matchedRule = findMatchingRule(tab?.url, rules);
@@ -359,11 +410,14 @@
     getProtectedTabsStorage,
     getRuleMatchLabel,
     getRuleModeLabel,
+    getTabPolicyLabel,
     getTerminatedTabsStorage,
     hasSessionStorageSupport,
     migrateLegacyWhitelist,
     normalizePattern,
     normalizeRules,
+    normalizeTabPolicies,
+    normalizeTabPolicy,
     resolveAutoEndPolicy,
   };
 })();

@@ -385,6 +385,11 @@ body {
   border: 1px solid #d7ebd8;
 }
 
+.tab-item-custom-idle {
+  background: #f5f9fc;
+  border: 1px solid #d6e4f0;
+}
+
 .tab-favicon {
   width: 20px;
   height: 20px;
@@ -418,9 +423,17 @@ body {
   padding: 1px 6px;
   font-size: 10px;
   font-weight: 600;
+  border-radius: 999px;
+}
+
+.tab-status-badge-never {
   color: #2e7d32;
   background: #e8f5e9;
-  border-radius: 999px;
+}
+
+.tab-status-badge-idle {
+  color: #1565c0;
+  background: #e3f2fd;
 }
 
 .tab-url {
@@ -433,30 +446,52 @@ body {
 
 .tab-actions {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
 }
 
-.protect-toggle-btn {
+.tab-policy-controls {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
-  padding: 6px 10px;
+}
+
+.tab-policy-select {
+  width: 86px;
+  height: 28px;
+  padding: 0 4px;
   font-size: 11px;
-  font-weight: 500;
-  color: #2e7d32;
-  background: transparent;
-  border: 1px solid #66bb6a;
+  line-height: 1;
+  color: #333;
+  background: #fff;
+  border: 1px solid #bbb;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.protect-toggle-btn:hover {
-  background: #66bb6a;
-  color: #fff;
+.tab-policy-select:disabled {
+  color: #888;
+  border-color: #ccc;
+  cursor: not-allowed;
 }
 
-.protect-toggle-btn:disabled {
+.tab-idle-minutes {
+  width: 40px;
+  height: 28px;
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1;
+  border: 1px solid #bbb;
+  border-radius: 6px;
+}
+
+.tab-idle-minutes:disabled {
   color: #888;
   border-color: #ccc;
   cursor: not-allowed;
@@ -464,15 +499,18 @@ body {
 
 .end-task-btn {
   flex-shrink: 0;
-  padding: 6px 12px;
+  height: 28px;
+  padding: 0 10px;
   font-size: 12px;
   font-weight: 500;
+  line-height: 1;
   color: #fff;
   background: #d32f2f;
   border: none;
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.15s ease;
+  white-space: nowrap;
 }
 
 .end-task-btn:hover {
@@ -490,15 +528,18 @@ body {
 
 .restore-btn {
   flex-shrink: 0;
-  padding: 6px 12px;
+  height: 28px;
+  padding: 0 10px;
   font-size: 12px;
   font-weight: 500;
+  line-height: 1;
   color: #fff;
   background: #1976d2;
   border: none;
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.15s ease;
+  white-space: nowrap;
 }
 
 .restore-btn:hover {
@@ -514,6 +555,72 @@ body {
   cursor: not-allowed;
 }
 
+.log-section {
+  flex-shrink: 0;
+  background: #fff;
+  border-top: 1px solid #e0e0e0;
+  padding: 8px 12px 10px;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.log-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #555;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.log-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: #666;
+  background: #eee;
+  border-radius: 999px;
+  padding: 1px 7px;
+  min-width: 1.5em;
+  text-align: center;
+}
+
+.log-panel {
+  margin-top: 8px;
+}
+
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.log-viewer {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #222;
+  background: #f6f7f8;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-viewer:empty::before {
+  content: '（尚無 log）';
+  color: #999;
+}
+
 .footer {
   display: flex;
   align-items: center;
@@ -522,6 +629,13 @@ body {
   padding: 10px 16px;
   background: #fff;
   border-top: 1px solid #e0e0e0;
+  flex-shrink: 0;
+}
+
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
 }
 

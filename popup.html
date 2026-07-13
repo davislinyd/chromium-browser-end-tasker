@@ -50,7 +50,7 @@
           <button type="button" id="rules-toggle" class="rules-toggle" aria-expanded="false">展開</button>
         </div>
         <div id="rules-content" class="rules-content hidden">
-          <p class="rules-hint">站點規則只影響自動 End Task；單一分頁請直接在分頁列點選 Never Close。</p>
+          <p class="rules-hint">Never Close（分頁或站點規則）會略過自動 End Task 與 End Task All；單一分頁 End Task 仍可強制終止。其餘分頁可選自訂閒置分鐘。</p>
           <div class="rule-form-row">
             <select id="rule-match-type" class="rule-select">
               <option value="domain">Domain</option>
@@ -83,11 +83,31 @@
 
     <div id="tab-list" class="tab-list"></div>
 
+    <div class="log-section">
+      <div class="log-header">
+        <span class="log-title">
+          除錯 Log
+          <span id="log-count" class="log-count" aria-live="polite">0</span>
+        </span>
+        <button type="button" id="log-toggle" class="rules-toggle" aria-expanded="false" aria-controls="log-panel">展開</button>
+      </div>
+      <div id="log-panel" class="log-panel hidden">
+        <div class="log-toolbar">
+          <button type="button" id="copy-debug-log" class="settings-btn" title="複製除錯 log 到剪貼簿">複製</button>
+          <button type="button" id="clear-debug-log" class="settings-btn" title="清除 log">清除</button>
+        </div>
+        <pre id="log-viewer" class="log-viewer" aria-label="除錯 log 內容"></pre>
+      </div>
+    </div>
+
     <footer class="footer">
       <span id="shortcut-display" class="shortcut-hint">快捷鍵：載入中...</span>
-      <button id="open-shortcut-settings" class="settings-btn">設定快捷鍵</button>
+      <div class="footer-actions">
+        <button type="button" id="open-shortcut-settings" class="settings-btn">設定快捷鍵</button>
+      </div>
     </footer>
   </div>
+  <script src="debug-log.js"></script>
   <script src="auto-end-rules.js"></script>
   <script src="prefix-tab-title.js"></script>
   <script src="end-task-core.js"></script>

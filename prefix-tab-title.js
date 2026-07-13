@@ -1,5 +1,20 @@
 const TITLE_PREFIX_MARK = '\u267B\uFE0F ';
+/** Match ♻️ with optional VS16 and following space(s). */
+const TITLE_PREFIX_RE = /^\u267B\uFE0F?\s+/;
 const FILE_ORIGIN_PATTERN = 'file:///*';
+
+/**
+ * Remove End Task title marker for display / storage hygiene.
+ * @param {string|undefined|null} title
+ * @returns {string}
+ */
+function stripTitlePrefixMark(title) {
+  if (typeof title !== 'string' || !title) return title || '';
+  if (title.startsWith(TITLE_PREFIX_MARK)) {
+    return title.slice(TITLE_PREFIX_MARK.length);
+  }
+  return title.replace(TITLE_PREFIX_RE, '');
+}
 const RESTRICTED_HOST_RULES = [
   { host: 'chromewebstore.google.com' },
   { host: 'chrome.google.com', pathPrefix: '/webstore' },
